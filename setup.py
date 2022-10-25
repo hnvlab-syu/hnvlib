@@ -23,7 +23,7 @@ setup(
     author='Summer Lee',
     maintainer='Summer Lee',
     maintainer_email='leeyeoreum01@gmail.com',
-    url='https://github.com/leeyeoreum02/hnvlib',
+    url='https://github.com/HnV-Lab/hnvlib',
     # license='BSD',
     packages=find_packages(),
     # Sympy 1.4 is needed for printing tests to pass, but 1.3 will still work
@@ -47,6 +47,6 @@ setup(
     project_urls={
         'Documentation': 'https://hnvlib.readthedocs.io',
         # 'Bug Tracker': 'https://github.com/leeyeoreum02/standard-code/issues',
-        'Source Code': 'https://github.com/leeyeoreum02/hnvlib',
+        'Source Code': 'https://github.com/HnV-Lab/hnvlib',
     },
 )
