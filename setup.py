@@ -46,7 +46,7 @@ setup(
     ],
     project_urls={
         'Documentation': 'https://hnvlib.readthedocs.io',
-        # 'Bug Tracker': 'https://github.com/leeyeoreum02/standard-code/issues',
+        # 'Bug Tracker': 'https://github.com/HnV-Lab/hnvlib/issues',
         'Source Code': 'https://github.com/HnV-Lab/hnvlib',
     },
 )
