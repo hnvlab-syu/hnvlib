@@ -1,13 +1,20 @@
 # Configuration file for the Sphinx documentation builder.
 
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath('../..'))
+
+from hnvlib import __version__  # noqa: E402
+
 # -- Project information
 
-project = 'Lumache'
-copyright = '2021, Graziella'
-author = 'Graziella'
+project = 'hnvlib'
+copyright = '2022, HnV Lab.'
+author = 'Summer Lee'
 
-release = '0.1'
-version = '0.1.0'
+release = __version__.split("+")[0]
+version = release
 
 # -- General configuration
 
