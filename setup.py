@@ -16,37 +16,38 @@ def get_long_description():
     return long_description
 
 
-setup(
-    name='hnvlib',
-    version=__version__,
-    description='Standard code library for HnV Lab.',
-    author='Summer Lee',
-    maintainer='Summer Lee',
-    maintainer_email='leeyeoreum01@gmail.com',
-    url='https://github.com/HnV-Lab/hnvlib',
-    # license='BSD',
-    packages=find_packages(),
-    # Sympy 1.4 is needed for printing tests to pass, but 1.3 will still work
-    install_requires=get_install_requirements(),
-    python_requires='<3.10',
-    long_description=get_long_description(),
-    classifiers=[
-        # 'Development Status :: 4 - Beta',
-        # 'Environment :: Console',
-        # 'Intended Audience :: Science/Research',
-        # 'License :: OSI Approved :: BSD License',
-        'Natural Language :: Korean',
-        'Operating System :: OS Independent',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        # 'Topic :: Scientific/Engineering :: Mathematics',
-        # 'Topic :: Scientific/Engineering :: Physics',
-    ],
-    project_urls={
-        'Documentation': 'https://hnvlib.readthedocs.io',
-        # 'Bug Tracker': 'https://github.com/HnV-Lab/hnvlib/issues',
-        'Source Code': 'https://github.com/HnV-Lab/hnvlib',
-    },
-)
+if __name__ == '__main__':
+    setup(
+        name='hnvlib',
+        version=__version__,
+        description='Standard code library for HnV Lab.',
+        author='Summer Lee',
+        maintainer='Summer Lee',
+        maintainer_email='leeyeoreum01@gmail.com',
+        url='https://github.com/HnV-Lab/hnvlib',
+        # license='BSD',
+        packages=find_packages(),
+        # Sympy 1.4 is needed for printing tests to pass, but 1.3 will still work
+        install_requires=get_install_requirements(),
+        python_requires='<3.9',
+        long_description=get_long_description(),
+        classifiers=[
+            # 'Development Status :: 4 - Beta',
+            # 'Environment :: Console',
+            # 'Intended Audience :: Science/Research',
+            # 'License :: OSI Approved :: BSD License',
+            'Natural Language :: Korean',
+            'Operating System :: OS Independent',
+            'Programming Language :: Python :: 3.6',
+            'Programming Language :: Python :: 3.7',
+            'Programming Language :: Python :: 3.8',
+            # 'Programming Language :: Python :: 3.9',
+            # 'Topic :: Scientific/Engineering :: Mathematics',
+            # 'Topic :: Scientific/Engineering :: Physics',
+        ],
+        project_urls={
+            'Documentation': 'https:w//hnvlib.readthedocs.io',
+            # 'Bug Tracker': 'https://github.com/HnV-Lab/hnvlib/issues',
+            'Source Code': 'https://github.com/HnV-Lab/hnvlib',
+        },
+    )
