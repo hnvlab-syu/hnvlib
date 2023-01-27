@@ -3,3 +3,5 @@ torchvision
 opencv-python
 protobuf~=3.19.0
 pytorch-lightning
+pandas
+matplotlib

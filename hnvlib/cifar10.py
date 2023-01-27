@@ -1,4 +1,5 @@
 """CIFAR-10 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
+CIFAR-10 Dataset Link : https://www.cs.toronto.edu/~kriz/cifar.html
 """
 
 from typing import Dict, List, TypeVar
@@ -16,7 +17,7 @@ _device = TypeVar('_device')
 _Optimizer = torch.optim.Optimizer
 
 
-class Net(nn.Module):
+class CIFARNetwork(nn.Module):
     """학습과 추론에 사용되는 간단한 뉴럴 네트워크입니다.
     """
     def __init__(self) -> None:
@@ -33,7 +34,7 @@ class Net(nn.Module):
 
         :param x: 입력 이미지
         :type x: Tensor
-        :return: 입력 이미지에 대한 예측값
+        :return: 입력 이미지에 대한 예측값 (클래스값)
         :rtype: Tensor
         """
         x = self.pool(F.relu(self.conv1(x)))
@@ -46,7 +47,7 @@ class Net(nn.Module):
 
 
 def train(dataloader: DataLoader, device: _device, model: nn.Module, loss_fn: nn.Module, optimizer: _Optimizer) -> None:
-    """MNIST 데이터셋으로 뉴럴 네트워크를 훈련합니다.
+    """CIFAR-10 데이터셋으로 뉴럴 네트워크를 훈련합니다.
 
     :param dataloader: 파이토치 데이터로더
     :type dataloader: DataLoader
@@ -77,15 +78,15 @@ def train(dataloader: DataLoader, device: _device, model: nn.Module, loss_fn: nn
 
 
 def test(dataloader: DataLoader, device: _device, model: nn.Module, loss_fn: nn.Module) -> None:
-    """MNIST 데이터셋으로 뉴럴 네트워크의 성능을 테스트합니다.
+    """CIFAR-10 데이터셋으로 뉴럴 네트워크의 성능을 테스트합니다.
 
     :param dataloader: 파이토치 데이터로더
     :type dataloader: DataLoader
-    :param device: 훈련에 사용되는 장치
+    :param device: 테스트에 사용되는 장치
     :type device: _device
-    :param model: 훈련에 사용되는 모델
+    :param model: 테스트에 사용되는 모델
     :type model: nn.Module
-    :param loss_fn: 훈련에 사용되는 오차 함수
+    :param loss_fn: 테스트에 사용되는 오차 함수
     :type loss_fn: nn.Module
     """
     size = len(dataloader.dataset)
@@ -105,7 +106,7 @@ def test(dataloader: DataLoader, device: _device, model: nn.Module, loss_fn: nn.
 
 
 def predict(test_data: Dataset, model: nn.Module) -> None:
-    """학습한 뉴럴 네트워크로 MNIST 데이터셋을 분류합니다.
+    """학습한 뉴럴 네트워크로 CIFAR-10 데이터셋을 분류합니다.
 
     :param test_data: 추론에 사용되는 데이터셋
     :type test_data: Dataset
@@ -166,7 +167,7 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model = Net().to(device)
+    model = CIFARNetwork().to(device)
 
     loss_fn = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
@@ -180,17 +181,17 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
     torch.save(model.state_dict(), 'cifar_net.pth')
     print('Saved PyTorch Model State to cifar_net.pth')
 
-    model = Net()
+    model = CIFARNetwork()
     model.load_state_dict(torch.load('cifar_net.pth'))
     predict(test_data, model)
 
 
-class NetModule(pl.LightningModule):
+class CIFARNetworkModule(pl.LightningModule):
     """모델과 학습/추론 코드가 포함된 파이토치 라이트닝 모듈입니다.
     """
     def __init__(self) -> None:
-        super(NetModule, self).__init__()
-        self.model = Net()
+        super(CIFARNetworkModule, self).__init__()
+        self.model = CIFARNetwork()
         self.loss_fn = nn.CrossEntropyLoss()
         self.metric = Accuracy(num_classes=10)
 
@@ -203,7 +204,7 @@ class NetModule(pl.LightningModule):
         return optim.SGD(self.parameters(), lr=0.01, momentum=0.9)
 
     def forward(self, x: Tensor) -> Tensor:
-        """피드 포워딩
+        """피드 포워딩 함수
 
         :param x: 입력 이미지
         :type x: Tensor
@@ -291,12 +292,12 @@ def run_pytorch_lightning(batch_size: int, epochs: int) -> None:
     train_dataloader = DataLoader(training_data, batch_size=batch_size, num_workers=16)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
-    model = NetModule()
+    model = CIFARNetworkModule()
     trainer = Trainer(max_epochs=epochs, gpus=1)
     trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
     trainer.save_checkpoint('cifar_net.ckpt')
     print('Saved PyTorch Lightning Model State to cifar_net.ckpt')
 
-    model = NetModule.load_from_checkpoint(checkpoint_path='cifar_net.ckpt')
+    model = CIFARNetworkModule.load_from_checkpoint(checkpoint_path='cifar_net.ckpt')
     predict(test_data, model)
