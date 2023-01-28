@@ -1,5 +1,7 @@
 """MNIST 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
+MNIST Dataset Link : https://www.kaggle.com/c/digit-recognizer
 """
+
 from typing import Dict, List
 import torch
 from torch import Tensor, nn, optim
@@ -14,11 +16,11 @@ from torchmetrics import Accuracy
 _Optimizer = torch.optim.Optimizer
 
 
-class NeuralNetwork(nn.Module):
+class MNISTNetwork(nn.Module):
     """학습과 추론에 사용되는 간단한 뉴럴 네트워크입니다.
     """
     def __init__(self) -> None:
-        super(NeuralNetwork, self).__init__()
+        super(MNISTNetwork, self).__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(28*28, 512),
@@ -144,7 +146,7 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model = NeuralNetwork().to(device)
+    model = MNISTNetwork().to(device)
 
     loss_fn = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
@@ -158,17 +160,17 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
     torch.save(model.state_dict(), 'model.pth')
     print('Saved PyTorch Model State to model.pth')
 
-    model = NeuralNetwork()
+    model = MNISTNetwork()
     model.load_state_dict(torch.load('model.pth'))
     predict(test_data, model)
 
 
-class NeuralNetworkModule(pl.LightningModule):
+class MNISTNetworkModule(pl.LightningModule):
     """모델과 학습/추론 코드가 포함된 파이토치 라이트닝 모듈입니다.
     """
     def __init__(self) -> None:
-        super(NeuralNetworkModule, self).__init__()
-        self.model = NeuralNetwork()
+        super(MNISTNetworkModule, self).__init__()
+        self.model = MNISTNetwork()
         self.loss_fn = nn.CrossEntropyLoss()
         self.metric = Accuracy(num_classes=10)
 
@@ -264,12 +266,12 @@ def run_pytorch_lightning(batch_size: int, epochs: int) -> None:
     train_dataloader = DataLoader(training_data, batch_size=batch_size, num_workers=16)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
-    model = NeuralNetworkModule()
+    model = MNISTNetworkModule()
     trainer = Trainer(max_epochs=epochs, gpus=1)
     trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
     trainer.save_checkpoint('model.ckpt')
     print('Saved PyTorch Lightning Model State to model.ckpt')
 
-    model = NeuralNetworkModule.load_from_checkpoint(checkpoint_path='model.ckpt')
+    model = MNISTNetworkModule.load_from_checkpoint(checkpoint_path='model.ckpt')
     predict(test_data, model)
