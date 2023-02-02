@@ -14,6 +14,13 @@ and offers a *simple* and *intuitive* API.
 Contents
 --------
 
+Image Classification
 .. toctree::
    mnist
    cifar10
+   fmnist
+   dmnist
+
+Object Detection
+.. toctree::
+   wheat
