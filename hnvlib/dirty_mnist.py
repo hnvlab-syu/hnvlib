@@ -1,5 +1,5 @@
-"""Dirty-MNIST 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
-Dirty-MNIST Dataset Link : https://blackhc.github.io/ddu_dirty_mnist/
+"""월간 데이콘 제 2회 컴퓨터 비전 학습 경진대회 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
+월간 데이콘 제 2회 컴퓨터 비전 학습 경진대회 Dataset Link : https://dacon.io/competitions/official/235697/overview/description
 """
 
 import os
