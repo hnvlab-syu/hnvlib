@@ -24,7 +24,7 @@ if __name__ == '__main__':
         author='Summer Lee, Wangtaek Oh',
         maintainer='Summer Lee',
         maintainer_email='leeyeoreum01@gmail.com',
-        url='https://github.com/HnV-Lab/hnvlib',
+        url='https://github.com/hnvlab-syu/hnvlib',
         # license='BSD',
         packages=find_packages(),
         # Sympy 1.4 is needed for printing tests to pass, but 1.3 will still work
@@ -48,6 +48,6 @@ if __name__ == '__main__':
         project_urls={
             'Documentation': 'https:w//hnvlib.readthedocs.io',
             # 'Bug Tracker': 'https://github.com/HnV-Lab/hnvlib/issues',
-            'Source Code': 'https://github.com/HnV-Lab/hnvlib',
+            'Source Code': 'https://github.com/hnvlab-syu/hnvlib',
         },
     )
