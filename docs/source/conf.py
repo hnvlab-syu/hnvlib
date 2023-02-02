@@ -11,7 +11,7 @@ from hnvlib import __version__  # noqa: E402
 
 project = 'hnvlib'
 copyright = '2022, HnV Lab.'
-author = 'Summer Lee'
+author = 'Summer Lee, Wangtaek Oh'
 
 release = __version__.split("+")[0]
 version = release

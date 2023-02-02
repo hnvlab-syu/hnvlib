@@ -21,7 +21,7 @@ if __name__ == '__main__':
         name='hnvlib',
         version=__version__,
         description='Standard code library for HnV Lab.',
-        author='Summer Lee',
+        author='Summer Lee, Wangtaek Oh',
         maintainer='Summer Lee',
         maintainer_email='leeyeoreum01@gmail.com',
         url='https://github.com/HnV-Lab/hnvlib',
