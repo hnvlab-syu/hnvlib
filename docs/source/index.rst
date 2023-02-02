@@ -22,5 +22,3 @@ Image Classification
    dmnist
 
 Object Detection
-.. toctree::
-   wheat
