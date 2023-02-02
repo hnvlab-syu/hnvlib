@@ -185,7 +185,7 @@ def collate_fn(batch: Tensor) -> Tuple:
     return tuple(zip(*batch))
 
 
-def train(dataloader: Dataset, device: str, model: nn.Module, optimizer: torch.optim.Optimizer) -> None:
+def train(dataloader: Dataloader, device: str, model: nn.Module, optimizer: torch.optim.Optimizer) -> None:
     """Wheat 데이터셋으로 뉴럴 네트워크를 훈련합니다.
     
     :param dataloader: 파이토치 데이터로더
