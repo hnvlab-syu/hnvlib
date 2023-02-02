@@ -16,6 +16,7 @@ Contents
 
 Image Classification
 .. toctree::
+   
    mnist
    cifar10
    fmnist
