@@ -14,7 +14,6 @@ and offers a *simple* and *intuitive* API.
 Contents
 --------
 
-Image Classification
 .. toctree::
    
    mnist
