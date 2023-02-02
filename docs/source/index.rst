@@ -20,5 +20,3 @@ Image Classification
    cifar10
    fmnist
    dmnist
-
-Object Detection
