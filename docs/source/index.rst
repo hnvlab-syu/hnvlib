@@ -14,20 +14,17 @@ and offers a *simple* and *intuitive* API.
 
 .. _image-classification:
 
-Image Classification
-====================
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-
-
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: image classification
 
    mnist
    cifar10
    fmnist
    dmnist
+
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 
 
 .. _object-detection:
