@@ -22,7 +22,7 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Image Classification:
+   :caption: Contents:
 
    mnist
    cifar10
