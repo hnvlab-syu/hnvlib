@@ -1,5 +1,3 @@
-.. _introduction
-
 Welcome to Lumache's documentation!
 ===================================
 
