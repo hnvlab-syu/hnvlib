@@ -2,9 +2,10 @@
    :maxdepth: 2
    :caption: Contents:
 
-   my-first-section
-   my-second-section
-   my-third-section
+   mnist
+   cifar10
+   fmnist
+   dmnist
 
 .. _my-first-section:
 
