@@ -16,7 +16,7 @@ and offers a *simple* and *intuitive* API.
 
 .. toctree::
    :maxdepth: 2
-   :caption: image classification
+   :caption: Image Classification
 
    mnist
    cifar10
@@ -29,7 +29,5 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 
 .. _object-detection:
 
-Object Detection
-================
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit.
