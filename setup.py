@@ -29,7 +29,7 @@ if __name__ == '__main__':
         packages=find_packages(),
         # Sympy 1.4 is needed for printing tests to pass, but 1.3 will still work
         install_requires=get_install_requirements(),
-        python_requires='<3.9',
+        python_requires='<3.10',
         long_description=get_long_description(),
         classifiers=[
             # 'Development Status :: 4 - Beta',
