@@ -22,8 +22,9 @@ Image Classification
 Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 
 
-.. autosummary::
-   :toctree: generated
+.. toctree::
+   :maxdepth: 2
+   :caption: Image Classification:
 
    mnist
    cifar10
@@ -36,4 +37,4 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 Object Detection
 ================
 
-Vestibulum facilisis, libero non cursus volutpat.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
