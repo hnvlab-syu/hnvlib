@@ -268,7 +268,15 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
         plt.clf()
 
 
-def run_pytorch(batch_size: int, epochs: int) -> None:
+def run_pytorch(
+    train_image_dir: os.PathLike,
+    train_csv_path: os.PathLike,
+    test_image_dir: os.PathLike,
+    test_csv_path: os.PathLike,
+    batch_size: int,
+    epochs: int,
+    lr: float,
+) -> None:
     """학습/추론 파이토치 파이프라인입니다.
 
     :param batch_size: 학습 및 추론 데이터셋의 배치 크기
@@ -276,39 +284,36 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    visualize_dataset()
+    visualize_dataset(image_dir=train_image_dir, csv_path=train_csv_path, save_dir='examples/global-wheat-detection/train')
 
     trainset = WheatDataset(
-        image_dir=TRAIN_IMAGE_DIR,
-        csv_path=TRAIN_CSV_PATH,
+        image_dir=train_image_dir,
+        csv_path=train_csv_path,
         transform=ToTensor()
     )
     testset = WheatDataset(
-        image_dir=TEST_IMAGE_DIR,
-        csv_path=TEST_CSV_PATH,
+        image_dir=test_image_dir,
+        csv_path=test_csv_path,
         transform=ToTensor(),
         is_test=True
     )
 
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=8, collate_fn=collate_fn)
-
+    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=1, collate_fn=collate_fn)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
     model = fasterrcnn_resnet50_fpn(num_classes=1+1).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    for t in range(epochs):
+        print(f'Epoch {t+1}\n-------------------------------')
+        train(trainloader, device, model, optimizer)
+    print('Done!')
 
-    # for t in range(epochs):
-    #     print(f'Epoch {t+1}\n-------------------------------')
-    #     train(trainloader, device, model, optimizer)
-    # print('Done!')
-
-    # torch.save(model.state_dict(), 'wheat-faster-rcnn.pth')
-    # print('Saved PyTorch Model State to wheat-faster-rcnn.pth')
+    torch.save(model.state_dict(), 'wheat-faster-rcnn.pth')
+    print('Saved PyTorch Model State to wheat-faster-rcnn.pth')
 
     model = fasterrcnn_resnet50_fpn(num_classes=1+1).to(device)
     model.load_state_dict(torch.load('wheat-faster-rcnn.pth'))
-    visualize_predictions(testset, device, model, '../examples/faster-rcnn')
+    visualize_predictions(testset, device, model, 'examples/global_wheat_detection/faster-rcnn')
     
     
 def run_pytorch_lightning():
@@ -349,7 +354,3 @@ def run_pytorch_lightning():
         
         def val_dataloader(self):
             return DataLoader(val_dataset, batch_size=2, shuffle=False, num_workers=4)
-
-
-def main():
-    run_pytorch(16, 5)
