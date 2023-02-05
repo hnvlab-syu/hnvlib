@@ -29,5 +29,11 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 
 .. _object-detection:
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Object Detection
+
+   wheat
+
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit.
