@@ -163,5 +163,6 @@ data/
 *.ckpt
 lightning_logs/
 wandb/
+checkpoints/
 
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks
