@@ -160,5 +160,8 @@ cython_debug/
 examples/
 *.pth
 data/
+*.ckpt
+lightning_logs/
+wandb/
 
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks
