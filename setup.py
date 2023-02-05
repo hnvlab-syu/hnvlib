@@ -26,7 +26,7 @@ if __name__ == '__main__':
         maintainer_email='leeyeoreum01@gmail.com',
         url='https://github.com/hnvlab-syu/hnvlib',
         # license='BSD',
-        packages=find_packages(),
+        packages=find_packages(exclude=['test']),
         # Sympy 1.4 is needed for printing tests to pass, but 1.3 will still work
         install_requires=get_install_requirements(),
         python_requires='<3.10',
@@ -46,7 +46,7 @@ if __name__ == '__main__':
             # 'Topic :: Scientific/Engineering :: Physics',
         ],
         project_urls={
-            'Documentation': 'https:w//hnvlib.readthedocs.io',
+            'Documentation': 'https://hnvlib.readthedocs.io',
             # 'Bug Tracker': 'https://github.com/HnV-Lab/hnvlib/issues',
             'Source Code': 'https://github.com/hnvlab-syu/hnvlib',
         },

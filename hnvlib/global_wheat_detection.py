@@ -27,12 +27,6 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from pytorch_lightning import LightningModule
 
 
-TRAIN_IMAGE_DIR = '../../../data/global-wheat-detection/train'
-TRAIN_CSV_PATH = '../../../data/global-wheat-detection/train.csv'
-TEST_IMAGE_DIR = '../../../data/global-wheat-detection/test'
-TEST_CSV_PATH = '../../../data/global-wheat-detection/sample_submission.csv'
-
-
 class WheatDataset(Dataset):
     """Wheat 데이터셋 사용자 정의 클래스를 정의합니다.
     """
@@ -109,7 +103,7 @@ class WheatDataset(Dataset):
         return image, target
 
 
-def visualize_dataset(save_dir: os.PathLike) -> None:
+def visualize_dataset(image_dir: os.PathLike, csv_path: os.PathLike, save_dir: os.PathLike, n_images: int = 10) -> None:
     """데이터셋 샘플 bbox 그려서 시각화
     
     :param save_dir: bbox 그린 그림 저장할 폴더 경로
@@ -122,11 +116,11 @@ def visualize_dataset(save_dir: os.PathLike) -> None:
         os.makedirs(save_dir)
 
     dataset = WheatDataset(
-        image_dir=TRAIN_IMAGE_DIR,
-        csv_path=TRAIN_CSV_PATH,
+        image_dir=image_dir,
+        csv_path=csv_path,
     )
 
-    indices = random.Random(36).choices(range(len(dataset)), k=5)
+    indices = random.Random(36).choices(range(len(dataset)), k=n_images)
     for i in indices:
         image, target = dataset[i]
         image = np.array(image)
@@ -170,22 +164,11 @@ def visualize_dataset(save_dir: os.PathLike) -> None:
         plt.clf()
 
 
-def get_transform() -> Sequence[Callable]:
-    """데이터셋을 Tensor로 변환해주는 함수 Sequence, 임의로 추가 가능
-    
-    :return: 함수들의 Sequence
-    :rtype: Sequence[Callable]
-    """
-    return Compose([
-        ToTensor()
-    ])
-
-
 def collate_fn(batch: Tensor) -> Tuple:
     return tuple(zip(*batch))
 
 
-def train(dataloader: Dataloader, device: str, model: nn.Module, optimizer: torch.optim.Optimizer) -> None:
+def train(dataloader: DataLoader, device: str, model: nn.Module, optimizer: torch.optim.Optimizer) -> None:
     """Wheat 데이터셋으로 뉴럴 네트워크를 훈련합니다.
     
     :param dataloader: 파이토치 데이터로더
@@ -293,19 +276,17 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    visualize_dataset('../examples/train_dataset')
-
-    transform = get_transform()
+    visualize_dataset()
 
     trainset = WheatDataset(
         image_dir=TRAIN_IMAGE_DIR,
         csv_path=TRAIN_CSV_PATH,
-        transform=transform
+        transform=ToTensor()
     )
     testset = WheatDataset(
         image_dir=TEST_IMAGE_DIR,
         csv_path=TEST_CSV_PATH,
-        transform=transform,
+        transform=ToTensor(),
         is_test=True
     )
 
@@ -372,7 +353,3 @@ def run_pytorch_lightning():
 
 def main():
     run_pytorch(16, 5)
-
-
-if __name__ == '__main__':
-    main()
