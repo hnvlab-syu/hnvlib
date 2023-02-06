@@ -492,6 +492,12 @@ def run_pytorch(
     
 class WheatDetectionModule(LightningModule):
     def __init__(self, csv_path, lr):
+        """_summary_
+
+        Args:
+            csv_path (_type_): _description_
+            lr (_type_): _description_
+        """
         super().__init__()
 
         self.lr = lr
@@ -499,10 +505,27 @@ class WheatDetectionModule(LightningModule):
         self.metric = MeanAveragePrecision(csv_path)
         
     def forward(self, x):
+        """_summary_
+
+        Args:
+            x (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         self.model.eval()
         return self.model(x)
     
     def training_step(self, batch, batch_idx):
+        """_summary_
+
+        Args:
+            batch (_type_): _description_
+            batch_idx (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         images, targets, _ = batch
         targets = [{k: v for k, v in t.items()} for t in targets]
 
@@ -514,6 +537,15 @@ class WheatDetectionModule(LightningModule):
         return {'loss': loss, 'log': loss_dict}
     
     def validation_step(self, batch, batch_idx):
+        """_summary_
+
+        Args:
+            batch (_type_): _description_
+            batch_idx (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         images, targets, image_ids = batch
         targets = [{k: v for k, v in t.items()} for t in targets]
 
@@ -531,10 +563,20 @@ class WheatDetectionModule(LightningModule):
         return {'val_loss': loss, 'log': loss_dict}
     
     def validation_epoch_end(self, outputs):
+        """_summary_
+
+        Args:
+            outputs (_type_): _description_
+        """
         self.metric.compute()
         self.metric.reset()
     
     def configure_optimizers(self):
+        """_summary_
+
+        Returns:
+            _type_: _description_
+        """
         return torch.optim.SGD(
             self.model.parameters(),
             lr=self.lr,
@@ -552,6 +594,17 @@ def run_pytorch_lightning(
     epochs: int,
     lr: float,
 ) -> None:
+    """_summary_
+
+    Args:
+        csv_path (os.PathLike): _description_
+        train_image_dir (os.PathLike): _description_
+        train_csv_path (os.PathLike): _description_
+        test_csv_path (os.PathLike): _description_
+        batch_size (int): _description_
+        epochs (int): _description_
+        lr (float): _description_
+    """
     split_dataset(csv_path=csv_path)
     
     visualize_dataset(image_dir=train_image_dir, csv_path=train_csv_path, save_dir='examples/global-wheat-detection/train')
