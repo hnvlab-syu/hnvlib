@@ -59,6 +59,8 @@ class DirtyMnistDataset(Dataset):
         :param transforms: 데이터셋을 정규화하거나 텐서로 변환, augmentation등의 전처리하기 위해 사용할 여러 함수들의 sequence
         :type transforms: Sequence[Callable]
         """
+        super().__init__()
+
         self.dir = dir
         self.transforms = transforms
 
