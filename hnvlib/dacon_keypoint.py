@@ -17,6 +17,7 @@ import torch
 from torch import nn, Tensor, optim
 from torch.utils.data import Dataset, DataLoader
 from torchvision.models.detection import keypointrcnn_resnet50_fpn
+from torchvision.utils import draw_keypoints
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.loggers import WandbLogger
 import albumentations as A
@@ -26,6 +27,7 @@ from albumentations.pytorch import ToTensorV2
 torch.set_float32_matmul_precision('medium')
 
 
+NUM_CLASSES = 1
 EDGES = [
     [0, 1], [0, 2], [2, 4], [1, 3], [6, 8], [8, 10],
     [5, 7], [7, 9], [5, 11], [11, 13], [13, 15], [6, 12],
@@ -42,6 +44,8 @@ def split_dataset(csv_path: os.PathLike, split_rate: float = 0.2) -> None:
     :param split_rate: train과 test로 데이터 나누는 비율
     :type split_rate: float
     """
+    root_dir = os.path.dirname(csv_path)
+
     df = pd.read_csv(csv_path)
     df = df.sample(frac=1).reset_index(drop=True)
 
@@ -50,11 +54,13 @@ def split_dataset(csv_path: os.PathLike, split_rate: float = 0.2) -> None:
 
     split_point = int(split_rate * len(grouped))
 
-    save_dir = os.path.split(csv_path)[0]
-    test_df = pd.concat(grouped_list[:split_point])
-    test_df.to_csv(os.path.join(save_dir, 'test_answer.csv'), index=False)
-    train_df = pd.concat(grouped_list[split_point:])
-    train_df.to_csv(os.path.join(save_dir, 'train_answer.csv'), index=False)
+    test_ids = grouped_list[:split_point]
+    train_ids = grouped_list[split_point:]
+
+    test_df = pd.concat(test_ids)
+    test_df.to_csv(os.path.join(root_dir, 'test_answer.csv'), index=False)
+    train_df = pd.concat(train_ids)
+    train_df.to_csv(os.path.join(root_dir, 'train_answer.csv'), index=False)
 
 
 class DaconKeypointDataset(Dataset):
@@ -82,7 +88,7 @@ class DaconKeypointDataset(Dataset):
         boxes = np.array([[x1, y1, x2, y2]], dtype=np.int64)
 
         image = Image.open(os.path.join(self.image_dir, image_id)).convert('RGB')
-        image = np.array(image)
+        image = np.asarray(image)
 
         targets ={
             'image': image,
@@ -98,8 +104,8 @@ class DaconKeypointDataset(Dataset):
             image = image / 255.0
 
             targets = {
-                'labels': torch.as_tensor(targets['labels'], dtype=torch.int64),
                 'boxes': torch.as_tensor(targets['bboxes'], dtype=torch.float32),
+                'labels': torch.as_tensor(targets['labels'], dtype=torch.int64),
                 'keypoints': torch.as_tensor(
                     np.concatenate([targets['keypoints'], np.ones((24, 1))], axis=1)[np.newaxis], dtype=torch.float32
                 )
@@ -133,19 +139,16 @@ def visualize_dataset(image_dir: os.PathLike, csv_path: os.PathLike, save_dir: o
     dataset = DaconKeypointDataset(
         image_dir=image_dir,
         csv_path=csv_path,
+        transform=get_transform()
     )
 
-    indices = random.Random(36).choices(range(len(dataset)), k=n_images)
+    indices = random.choices(range(len(dataset)), k=n_images)
     for i in tqdm(indices):
         image, target, image_id = dataset[i]
+        image = (image * 255.0).type(torch.uint8)
 
-        plt.imshow(image)
-        ax = plt.gca()
-
-        for edge in EDGES:
-            x = [target['keypoints'][edge[0]][0], target['keypoints'][edge[1]][0]]
-            y = [target['keypoints'][edge[0]][1], target['keypoints'][edge[1]][1]]
-            plt.plot(x, y, c='b', linestyle='-', linewidth=2, marker='o', markerfacecolor='g', markeredgecolor='none')
+        result = draw_keypoints(image, target['keypoints'], connectivity=EDGES, colors='blue', radius=4, width=3)
+        plt.imshow(result.permute(1, 2, 0).numpy())
 
         plt.axis('off')
         plt.savefig(os.path.join(save_dir, image_id), dpi=150, bbox_inches='tight', pad_inches=0)
@@ -164,7 +167,6 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, optimizer: torc
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
         loss_dict = model(images, targets)
-        # print(loss_dict.keys())
         loss = sum(loss for loss in loss_dict.values())
 
         optimizer.zero_grad()
@@ -173,7 +175,18 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, optimizer: torc
 
         if batch % 10 == 0:
             current = batch * len(images)
-            print(f'total loss: {loss:>4f}, cls loss: {loss_dict["loss_classifier"]:>4f}, box loss: {loss_dict["loss_box_reg"]:>4f}, obj loss: {loss_dict["loss_objectness"]:>4f}, rpn loss: {loss_dict["loss_rpn_box_reg"]:>4f}, kpt loss: {loss_dict["loss_keypoint"]:>4f} [{current:>5d}/{size:>5d}]')
+            message = 'total loss: {:>4f}, cls loss: {:>4f}, box loss: {:>4f}, obj loss: {:>4f}, rpn loss: {:>4f}, kpt loss: {:>4f}  [{:>5d}/{:>5d}]'
+            message = message.format(
+                loss,
+                loss_dict['loss_classifier'],
+                loss_dict['loss_box_reg'],
+                loss_dict['loss_objectness'],
+                loss_dict['loss_rpn_box_reg'],
+                loss_dict['loss_keypoint'],
+                current,
+                size
+            )
+            print(message)
 
 
 class ObjectKeypointSimilarity:
@@ -183,7 +196,7 @@ class ObjectKeypointSimilarity:
         json_path = self.to_coco(csv_path)
         self.coco_gt = COCO(json_path)
 
-        self.preds = []
+        self.detections = []
 
     def to_coco(self, csv_path: os.PathLike) -> os.PathLike:
         df = pd.read_csv(csv_path)
@@ -247,43 +260,34 @@ class ObjectKeypointSimilarity:
         return save_path
     
     def update(self, preds, image_ids):
-        self.preds.extend(list(zip(preds, image_ids)))
+        for p, image_id in zip(preds, image_ids):
+            p['boxes'][:, 2] = p['boxes'][:, 2] - p['boxes'][:, 0]
+            p['boxes'][:, 3] = p['boxes'][:, 3] - p['boxes'][:, 1]
+            p['boxes'] = p['boxes'].cpu().numpy()
 
-    def reset(self):
-        self.preds = []
+            num_keypoints = len(p['keypoints'])
+            p['keypoints'][:, :, 2] += 1
+            p['keypoints'] = p['keypoints'].reshape(num_keypoints, -1) if num_keypoints > 0 else p['keypoints'] 
+            p['keypoints'] = p['keypoints'].cpu().numpy()
 
-    def compute(self):
-        detections = []
-        for p, image_id in self.preds:
-            pred_boxes = p['boxes']
-            pred_boxes[:, 2] = pred_boxes[:, 2] - pred_boxes[:, 0]
-            pred_boxes[:, 3] = pred_boxes[:, 3] - pred_boxes[:, 1]
-            pred_boxes = pred_boxes.cpu().numpy()
-
-            pred_keypoints = p['keypoints']
-            num_keypoints = len(pred_keypoints)
-            # print(pred_keypoints)
-            pred_keypoints[:, :, 2] += 1
-            # print(pred_keypoints)
-            pred_keypoints = pred_keypoints.reshape(num_keypoints, -1) if num_keypoints > 0 else pred_keypoints 
-            # print(pred_keypoints)
-            pred_keypoints = pred_keypoints.cpu().numpy()
-
-            pred_scores = p['scores'].cpu().numpy()
-            pred_labels = p['labels'].cpu().numpy()
+            p['scores'] = p['scores'].cpu().numpy()
+            p['labels'] = p['labels'].cpu().numpy()
 
             image_id = self.id_csv2coco[image_id]
-            for b, k, s, l in zip(pred_boxes, pred_keypoints, pred_scores, pred_labels):
-                dt = {
+            for b, l, s, k in zip(*p.values()):
+                self.detections.append({
                     'image_id': image_id,
                     'category_id': l,
                     'bbox': b.tolist(),
                     'keypoints': k.tolist(),
                     'score': s
-                }
-                detections.append(dt)
+                })
 
-        coco_dt = self.coco_gt.loadRes(detections)
+    def reset(self):
+        self.detections = []
+
+    def compute(self):
+        coco_dt = self.coco_gt.loadRes(self.detections)
         
         coco_eval = COCOeval(self.coco_gt, coco_dt, 'bbox')
         coco_eval.evaluate()
@@ -316,9 +320,8 @@ def test(dataloader: DataLoader, device, model: nn.Module, metric) -> None:
     test_obj_loss = 0
     test_rpn_loss = 0
     test_kpt_loss = 0
-
     with torch.no_grad():
-        for batch, (images, targets, image_ids) in enumerate(dataloader):
+        for images, targets, image_ids in dataloader:
             images = [image.to(device) for image in images]
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
@@ -335,18 +338,17 @@ def test(dataloader: DataLoader, device, model: nn.Module, metric) -> None:
 
             model.eval()
             preds = model(images)
-            # print(preds)
-            metric.update(preds, image_ids)
 
+            metric.update(preds, image_ids)
     test_loss /= num_batches
     test_cls_loss /= num_batches
     test_box_loss /= num_batches
     test_obj_loss /= num_batches
     test_rpn_loss /= num_batches
     test_kpt_loss /= num_batches
-
     print(f'Test Error: \n Avg loss: {test_loss:>8f} \n Class loss: {test_cls_loss:>8f} \n Box loss: {test_box_loss:>8f} \n Obj loss: {test_obj_loss:>8f} \n RPN loss: {test_rpn_loss:>8f} \n Keypoint loss: {test_kpt_loss:>8f} \n')
     metric.compute()
+
     metric.reset()
     print()
 
@@ -375,22 +377,14 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
     indices = random.choices(range(len(testset)), k=n_images)
     for i in tqdm(indices):
         image, _, image_id = testset[i]
+        
         image = [image.to(device)]
-        pred = model(image)[0]
-        # print(preds)
+        pred = model(image)
+        pred = {k: v.detach().cpu() for k, v in pred[0].items() if pred[0]['scores'] >= conf_thr}
 
-        image = image[0].detach().cpu().numpy().transpose(1, 2, 0)
-
-        plt.imshow(image)
-        ax = plt.gca()
-
-        keypoints = pred['keypoints'].detach().cpu().numpy()
-        for keypoint in keypoints:
-            for edge in EDGES:
-                # print(keypoints.shape)
-                x = [keypoint[edge[0], 0], keypoint[edge[1], 0]]
-                y = [keypoint[edge[0], 1], keypoint[edge[1], 1]]
-                plt.plot(x, y, c='b', linestyle='-', linewidth=2, marker='o', markerfacecolor='g', markeredgecolor='none')
+        image = (image * 255.0).type(torch.uint8)
+        result = draw_keypoints(image.cpu(), pred['keypoints'], connectivity=EDGES, colors='blue', radius=4, width=3)
+        plt.imshow(result.permute(1, 2, 0).numpy())
 
         plt.axis('off')
         plt.savefig(os.path.join(save_dir, image_id), dpi=150, bbox_inches='tight', pad_inches=0)
@@ -413,45 +407,46 @@ def run_pytorch(
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    split_dataset(csv_path=csv_path)
+    split_dataset(csv_path)
     
-    visualize_dataset(image_dir=image_dir, csv_path=train_csv_path, save_dir='examples/dacon-keypoint/train')
-    visualize_dataset(image_dir=image_dir, csv_path=test_csv_path, save_dir='examples/dacon-keypoint/test')
+    visualize_dataset(image_dir, train_csv_path, save_dir='examples/dacon-keypoint/train')
+    visualize_dataset(image_dir, test_csv_path, save_dir='examples/dacon-keypoint/test')
 
-    trainset = DaconKeypointDataset(
+    training_data = DaconKeypointDataset(
         image_dir=image_dir,
         csv_path=train_csv_path,
         transform=get_transform(),
     )
-    testset = DaconKeypointDataset(
+    test_data = DaconKeypointDataset(
         image_dir=image_dir,
         csv_path=test_csv_path,
         transform=get_transform(),
     )
 
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=1, collate_fn=collate_fn)
-    testloader = DataLoader(testset, batch_size=batch_size, num_workers=1, collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=1, collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=1, collate_fn=collate_fn)
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = keypointrcnn_resnet50_fpn(num_classes=1+1, num_keypoints=24)
-    model.to(device)
+    
+    model = keypointrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1, num_keypoints=24).to(device)
+    
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=0.005)
     metric = ObjectKeypointSimilarity(image_dir=image_dir, csv_path=test_csv_path)
 
     for t in range(epochs):
         print(f'Epoch {t+1}\n-------------------------------')
-        train(trainloader, device, model, optimizer)
-        print()
-        test(testloader, device, model, metric)
+        train(train_dataloader, device, model, optimizer)
+        test(test_dataloader, device, model, metric)
     print('Done!')
 
     torch.save(model.state_dict(), 'dacon-keypoint-rcnn.pth')
     print('Saved PyTorch Model State to dacon-keypoint-rcnn.pth')
 
-    model = keypointrcnn_resnet50_fpn(num_classes=1+1, num_keypoints=24)
+    model = keypointrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1, num_keypoints=24)
     model.load_state_dict(torch.load('dacon-keypoint-rcnn.pth'))
     model.to(device)
 
-    visualize_predictions(testset, device, model, 'examples/dacon-keypoint/keypoint-rcnn')
+    visualize_predictions(test_data, device, model, 'examples/dacon-keypoint/keypoint-rcnn')
 
 
 class DaconKeypointModule(LightningModule):
@@ -465,7 +460,7 @@ class DaconKeypointModule(LightningModule):
         super().__init__()
 
         self.lr = lr
-        self.model = keypointrcnn_resnet50_fpn(num_classes=1+1, num_keypoints=24)
+        self.model = keypointrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1, num_keypoints=24)
         self.metric = ObjectKeypointSimilarity(image_dir, test_csv_path)
         
     def forward(self, x):

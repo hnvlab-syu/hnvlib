@@ -20,10 +20,13 @@ import pycocotools.mask as coco_mask
 import torch
 from torch import nn, Tensor, optim
 from torch.utils.data import Dataset, DataLoader
-from torchvision.transforms import ToTensor
+from torchvision import transforms
 from torchvision.models.detection.mask_rcnn import maskrcnn_resnet50_fpn
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.loggers import WandbLogger
+
+
+torch.set_float32_matmul_precision('medium')
 
 
 NUM_CLASSES = 21
@@ -47,14 +50,21 @@ def split_dataset(json_path: os.PathLike, split_rate: float = 0.01) -> None:
     cats = coco.dataset['categories']
 
     split_idx = int(split_rate * len(image_ids))
-    val_ids = image_ids[:split_idx]
+    test_ids = image_ids[:split_idx]
     train_ids = image_ids[split_idx:]
 
+    test_imgs = coco.loadImgs(ids=test_ids)
     train_imgs = coco.loadImgs(ids=train_ids)
-    val_imgs = coco.loadImgs(ids=val_ids)
     
+    test_anns = coco.loadAnns(coco.getAnnIds(imgIds=test_ids))
     train_anns = coco.loadAnns(coco.getAnnIds(imgIds=train_ids))
-    val_anns = coco.loadAnns(coco.getAnnIds(imgIds=val_ids))
+
+    test_coco = defaultdict(list)
+    test_coco['images'] = test_imgs
+    test_coco['annotations'] = test_anns
+    test_coco['categories'] = cats
+    with open(os.path.join(root_dir, 'val_annotations.json'), 'w') as f:
+        json.dump(test_coco, f)
 
     train_coco = defaultdict(list)
     train_coco['images'] = train_imgs
@@ -62,13 +72,6 @@ def split_dataset(json_path: os.PathLike, split_rate: float = 0.01) -> None:
     train_coco['categories'] = cats
     with open(os.path.join(root_dir, 'train_annotations.json'), 'w') as f:
         json.dump(train_coco, f)
-
-    val_coco = defaultdict(list)
-    val_coco['images'] = val_imgs
-    val_coco['annotations'] = val_anns
-    val_coco['categories'] = cats
-    with open(os.path.join(root_dir, 'val_annotations.json'), 'w') as f:
-        json.dump(val_coco, f)
 
 
 class KFashionDataset(Dataset):
@@ -91,9 +94,6 @@ class KFashionDataset(Dataset):
         annots = [x for x in self.coco.loadAnns(annot_ids) if x['image_id'] == image_id]
         
         boxes = np.array([annot['bbox'] for annot in annots], dtype=np.float32)
-        if boxes.ndim != 2:
-            print(annots)
-            print(boxes)
         boxes[:, 2] = boxes[:, 0] + boxes[:, 2]
         boxes[:, 3] = boxes[:, 1] + boxes[:, 3]
 
@@ -131,7 +131,7 @@ def visualize_dataset(image_dir: os.PathLike, json_path: os.PathLike, save_dir: 
     dataset = KFashionDataset(
         image_dir=image_dir,
         json_path=json_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
 
     classes = [cat['name'] for cat in dataset.coco.dataset['categories']]
@@ -144,12 +144,14 @@ def visualize_dataset(image_dir: os.PathLike, json_path: os.PathLike, save_dir: 
         plt.imshow(image)
         ax = plt.gca()
 
-        for box, mask, category_id in zip(target['boxes'], target['masks'], target['labels']):
+        for box, mask, category_id in zip(*target.values()):
             x1, y1, x2, y2 = box
+            w = x2 - x1
+            h = y2 - y1
             category_id = category_id.item()
 
             ax.text(
-                (x1 + x2) // 2, (y1 + y2) // 2,
+                x1 + w // 2, y1 + h // 2,
                 classes[category_id-1],
                 c='white',
                 size=10,
@@ -180,7 +182,8 @@ def visualize_dataset(image_dir: os.PathLike, json_path: os.PathLike, save_dir: 
                 ax.add_patch(polygon_fill)
 
         plt.axis('off')
-        plt.savefig(os.path.join(save_dir, dataset.coco.loadImgs(image_id)[0]['file_name']), dpi=150, bbox_inches='tight', pad_inches=0)
+        file_name = dataset.coco.loadImgs(image_id)[0]['file_name']
+        plt.savefig(os.path.join(save_dir, file_name), dpi=150, bbox_inches='tight', pad_inches=0)
         plt.clf()
 
 
@@ -215,7 +218,18 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, optimizer: torc
 
         if batch % 10 == 0:
             current = batch * len(images)
-            print(f'total loss: {loss:>4f}, cls loss: {loss_dict["loss_classifier"]:>4f}, box loss: {loss_dict["loss_box_reg"]:>4f}, obj loss: {loss_dict["loss_objectness"]:>4f}, rpn loss: {loss_dict["loss_rpn_box_reg"]:>4f}, mask loss: {loss_dict["loss_mask"]:>4f} [{current:>5d}/{size:>5d}]')
+            message = 'total loss: {:>4f}, cls loss: {:>4f}, box loss: {:>4f}, obj loss: {:>4f}, rpn loss: {:>4f}, mask loss: {:>4f}  [{:>5d}/{:>5d}]'
+            message = message.format(
+                loss,
+                loss_dict['loss_classifier'],
+                loss_dict['loss_box_reg'],
+                loss_dict['loss_objectness'],
+                loss_dict['loss_rpn_box_reg'],
+                loss_dict['loss_mask'],
+                current,
+                size
+            )
+            print(message)
 
 
 class MeanAveragePrecision:
@@ -280,9 +294,8 @@ def test(dataloader: DataLoader, device, model: nn.Module, metric) -> None:
     test_obj_loss = 0
     test_rpn_loss = 0
     test_mask_loss = 0
-
     with torch.no_grad():
-        for batch, (images, targets, image_ids) in enumerate(dataloader):
+        for images, targets, image_ids in dataloader:
             images = [image.to(device) for image in images]
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
@@ -299,18 +312,17 @@ def test(dataloader: DataLoader, device, model: nn.Module, metric) -> None:
 
             model.eval()
             preds = model(images)
-            # print(preds)
-            metric.update(preds, image_ids)
 
+            metric.update(preds, image_ids)
     test_loss /= num_batches
     test_cls_loss /= num_batches
     test_box_loss /= num_batches
     test_obj_loss /= num_batches
     test_rpn_loss /= num_batches
     test_mask_loss /= num_batches
-
     print(f'Test Error: \n Avg loss: {test_loss:>8f} \n Class loss: {test_cls_loss:>8f} \n Box loss: {test_box_loss:>8f} \n Obj loss: {test_obj_loss:>8f} \n RPN loss: {test_rpn_loss:>8f} \n Mask loss: {test_mask_loss:>8f} \n')
     metric.compute()
+    
     metric.reset()
     print()
 
@@ -335,17 +347,17 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
         shutil.rmtree(save_dir)
         os.makedirs(save_dir)
 
-    classes = {cat['id']: cat['name'] for cat in testset.coco.dataset['categories']}
+    classes = [cat['name'] for cat in testset.coco.dataset['categories']]
 
     model.eval()
     indices = random.choices(range(len(testset)), k=n_images)
     for i in tqdm(indices):
         image, _, image_id = testset[i]
         image = [image.to(device)]
-        pred = model(image)[0]
-        # print(preds)
+        pred = model(image)
 
         image = image[0].detach().cpu().numpy().transpose(1, 2, 0)
+        pred = {k: v.detach().cpu().numpy() for k, v in pred[0].items()}
 
         plt.imshow(image)
         ax = plt.gca()
@@ -353,10 +365,12 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
         for box, category_id, score, mask in zip(*pred.values()):
             if score >= conf_thr:
                 x1, y1, x2, y2 = box
+                w = x2 - x1
+                h = y2 - y1
                 category_id = category_id.item()
 
                 ax.text(
-                    (x1 + x2) // 2, (y1 + y2) // 2,
+                    x1 + w // 2, y1 + h // 2,
                     f'{classes[category_id-1]}: {score:.2f}',
                     c='white',
                     size=10,
@@ -366,7 +380,7 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
                     va='center', ha='center',
                 )
 
-                contours, _ = cv2.findContours(mask.numpy().astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                contours, _ = cv2.findContours((mask >= 0.5).astype(np.uint8).transpose(1, 2, 0), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 for contour in contours:
                     coords = contour.squeeze(1)
                     polygon_edge = patches.Polygon(
@@ -408,35 +422,36 @@ def run_pytorch(
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    split_dataset(json_path=json_path, split_rate=0.01)
+    split_dataset(json_path, split_rate=0.01)
     
-    visualize_dataset(image_dir=image_dir, json_path=train_json_path, save_dir='examples/k-fashion/train', alpha=0.8)
-    visualize_dataset(image_dir=image_dir, json_path=test_json_path, save_dir='examples/k-fashion/val', alpha=0.8)
+    visualize_dataset(image_dir, train_json_path, save_dir='examples/k-fashion/train', alpha=0.8)
+    visualize_dataset(image_dir, test_json_path, save_dir='examples/k-fashion/val', alpha=0.8)
 
-    trainset = KFashionDataset(
+    training_data = KFashionDataset(
         image_dir=image_dir,
         json_path=train_json_path,
-        transform=ToTensor(),
+        transform=transforms.ToTensor(),
     )
-    testset = KFashionDataset(
+    test_data = KFashionDataset(
         image_dir=image_dir,
         json_path=test_json_path,
-        transform=ToTensor(),
+        transform=transforms.ToTensor(),
     )
 
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=collate_fn)
-    testloader = DataLoader(testset, batch_size=batch_size, num_workers=0, collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=0, collate_fn=collate_fn)
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = maskrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1)
-    model.to(device)
+    
+    model = maskrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1).to(device)
+    
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=0.005)
     metric = MeanAveragePrecision(json_path=test_json_path)
 
     for t in range(epochs):
         print(f'Epoch {t+1}\n-------------------------------')
-        train(trainloader, device, model, optimizer)
-        print()
-        test(testloader, device, model, metric)
+        train(train_dataloader, device, model, optimizer)
+        test(test_dataloader, device, model, metric)
     print('Done!')
 
     torch.save(model.state_dict(), 'k-fashion-mask-rcnn.pth')
@@ -446,7 +461,7 @@ def run_pytorch(
     model.load_state_dict(torch.load('k-fashion-mask-rcnn.pth'))
     model.to(device)
 
-    visualize_predictions(testset, device, model, 'examples/k-fashion/mask-rcnn')
+    visualize_predictions(test_data, device, model, 'examples/k-fashion/mask-rcnn', conf_thr=0.3)
 
 
 class KFashionModule(LightningModule):
@@ -572,12 +587,12 @@ def run_pytorch_lightning(
     trainset = KFashionDataset(
         image_dir=image_dir,
         json_path=train_json_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
     testset = KFashionDataset(
         image_dir=image_dir,
-        csv_path=test_json_path,
-        transform=ToTensor(),
+        json_path=test_json_path,
+        transform=transforms.ToTensor(),
     )
 
     trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=1, collate_fn=collate_fn)
@@ -595,4 +610,4 @@ def run_pytorch_lightning(
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
     
-    visualize_predictions(testset, device, model, 'examples/k-fashion/mask-rcnn-lightning')
+    visualize_predictions(testset, device, model, 'examples/k-fashion/mask-rcnn-lightning', conf_thr=0.3)

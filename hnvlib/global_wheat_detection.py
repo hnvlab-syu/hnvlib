@@ -7,13 +7,12 @@ import os
 import shutil
 from typing import Callable, Optional, Sequence, Tuple, TypeVar
 import random
-import re
-from pprint import pprint
 import json
 from ast import literal_eval
 
 import pandas as pd
 from PIL import Image
+from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -26,11 +25,14 @@ import torchvision
 from torch import Tensor, nn
 from torch.utils.data import Dataset, DataLoader
 from torch import optim
-from torchvision.transforms import ToTensor, Compose
-from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn, FastRCNNPredictor, FasterRCNN_ResNet50_FPN_Weights
+from torchvision import transforms
+from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.loggers import WandbLogger
+
+
+NUM_CLASSES = 1
 
 
 _device = TypeVar('_device')
@@ -48,6 +50,8 @@ def split_dataset(csv_path: os.PathLike, split_rate: float = 0.2) -> None:
     :param split_rate: train과 test로 데이터 나누는 비율
     :type split_rate: float
     """
+    root_dir = os.path.dirname(csv_path)
+
     df = pd.read_csv(csv_path)
     df = df.sample(frac=1).reset_index(drop=True)
 
@@ -56,11 +60,13 @@ def split_dataset(csv_path: os.PathLike, split_rate: float = 0.2) -> None:
 
     split_point = int(split_rate * len(grouped))
 
-    save_dir = os.path.split(csv_path)[0]
-    test_df = pd.concat(grouped_list[:split_point])
-    test_df.to_csv(os.path.join(save_dir, 'test_answer.csv'), index=False)
-    train_df = pd.concat(grouped_list[split_point:])
-    train_df.to_csv(os.path.join(save_dir, 'train_answer.csv'), index=False)
+    test_ids = grouped_list[:split_point]
+    train_ids = grouped_list[split_point:]
+
+    test_df = pd.concat(test_ids)
+    test_df.to_csv(os.path.join(root_dir, 'test_answer.csv'), index=False)
+    train_df = pd.concat(train_ids)
+    train_df.to_csv(os.path.join(root_dir, 'train_answer.csv'), index=False)
 
 
 class WheatDataset(Dataset):
@@ -87,15 +93,10 @@ class WheatDataset(Dataset):
 
         df = pd.read_csv(csv_path)
         self.image_dir = image_dir
-        self.image_ids = df['image_id'].unique()
-        
-        self.all_bboxes = defaultdict(list)
-        for _, row in df.iterrows():
-            bbox = re.sub('\[|\]', '', row['bbox'])
-            bbox = list(map(float, bbox.split(', ')))
-            x, y, w, h = bbox
-            bbox = [x, y, x + w, y + h]
-            self.all_bboxes[row['image_id']].append(bbox)
+
+        grouped = df.groupby(by='image_id')
+        self.grouped_dict = {image_id: group for image_id, group in grouped}
+        self.image_ids = tuple(self.grouped_dict.keys())
 
         self.transform = transform
 
@@ -119,16 +120,16 @@ class WheatDataset(Dataset):
 
         image = Image.open(os.path.join(self.image_dir, f'{image_id}.jpg')).convert('RGB')
 
+        boxes = [literal_eval(box) for box in self.grouped_dict[image_id]['bbox']]
+        labels = [1] * len(boxes)
+
         if self.transform is not None:
             image = self.transform(image)
 
-        bboxes_per_image = self.all_bboxes[image_id]
-        class_labels = [1] * len(bboxes_per_image)
-
-        target = {
-            'boxes': torch.as_tensor(bboxes_per_image, dtype=torch.float32),
-            'labels': torch.as_tensor(class_labels, dtype=torch.int64)
-        }
+            target = {
+                'boxes': torch.as_tensor(boxes, dtype=torch.float32),
+                'labels': torch.as_tensor(labels, dtype=torch.int64)
+            }
 
         return image, target, image_id
     
@@ -152,12 +153,13 @@ def visualize_dataset(image_dir: os.PathLike, csv_path: os.PathLike, save_dir: o
     dataset = WheatDataset(
         image_dir=image_dir,
         csv_path=csv_path,
+        transform=transforms.ToTensor()
     )
 
-    indices = random.Random(36).choices(range(len(dataset)), k=n_images)
+    indices = random.choices(range(len(dataset)), k=n_images)
     for i in indices:
         image, target, image_id = dataset[i]
-        image = np.array(image)
+        image = image.numpy().transpose(1, 2, 0)
 
         plt.imshow(image)
         ax = plt.gca()
@@ -180,7 +182,7 @@ def visualize_dataset(image_dir: os.PathLike, csv_path: os.PathLike, save_dir: o
                 x1, y1,
                 category_id,
                 c='white',
-                size=6,
+                size=10,
                 path_effects=[pe.withStroke(linewidth=2, foreground='green')],
                 family='sans-serif',
                 weight='semibold',
@@ -224,7 +226,17 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, optimizer: torc
 
         if batch % 10 == 0:
             current = batch * len(images)
-            print(f'total loss: {loss:>4f}, cls loss: {loss_dict["loss_classifier"]:>4f}, box loss: {loss_dict["loss_box_reg"]:>4f}, obj loss: {loss_dict["loss_objectness"]:>4f}, rpn loss: {loss_dict["loss_rpn_box_reg"]:>4f} [{current:>5d}/{size:>5d}]')
+            message = 'total loss: {:>4f}, cls loss: {:>4f}, box loss: {:>4f}, obj loss: {:>4f}, rpn loss: {:>4f}  [{:>5d}/{:>5d}]'
+            message = message.format(
+                loss,
+                loss_dict['loss_classifier'],
+                loss_dict['loss_box_reg'],
+                loss_dict['loss_objectness'],
+                loss_dict['loss_rpn_box_reg'],
+                current,
+                size
+            )
+            print(message)
 
 
 class MeanAveragePrecision:
@@ -233,7 +245,7 @@ class MeanAveragePrecision:
         json_path = self.to_coco(csv_path)
         self.coco_gt = COCO(json_path)
 
-        self.preds = []
+        self.detections = []
 
     def to_coco(self, csv_path: os.PathLike) -> os.PathLike:
         df = pd.read_csv(csv_path)
@@ -276,41 +288,33 @@ class MeanAveragePrecision:
         return save_path
     
     def update(self, preds, image_ids):
-        self.preds.extend(list(zip(preds, image_ids)))
+        for p, image_id in zip(preds, image_ids):
+            p['boxes'][:, 2] = p['boxes'][:, 2] - p['boxes'][:, 0]
+            p['boxes'][:, 3] = p['boxes'][:, 3] - p['boxes'][:, 1]
+            p['boxes'] = p['boxes'].cpu().numpy()
 
-    def reset(self):
-        self.preds = []
-
-    def compute(self):
-        detections = []
-        for p, image_id in self.preds:
-            pred_boxes = p['boxes']
-            pred_boxes[:, 2] = pred_boxes[:, 2] - pred_boxes[:, 0]
-            pred_boxes[:, 3] = pred_boxes[:, 3] - pred_boxes[:, 1]
-            pred_boxes = pred_boxes.cpu().numpy()
-
-            pred_scores = p['scores'].cpu().numpy()
-            pred_labels = p['labels'].cpu().numpy()
+            p['scores'] = p['scores'].cpu().numpy()
+            p['labels'] = p['labels'].cpu().numpy()
 
             image_id = self.id_csv2coco[image_id]
-            for b, s, l in zip(pred_boxes, pred_scores, pred_labels):
-                dt = {
+            for b, l, s in zip(*p.values()):
+                self.detections.append({
                     'image_id': image_id,
                     'category_id': l,
                     'bbox': b.tolist(),
                     'score': s
-                }
-                detections.append(dt)
+                })
 
-        coco_dt = self.coco_gt.loadRes(detections)
+    def reset(self):
+        self.detections = []
+
+    def compute(self):
+        coco_dt = self.coco_gt.loadRes(self.detections)
+
         coco_eval = COCOeval(self.coco_gt, coco_dt, 'bbox')
         coco_eval.evaluate()
         coco_eval.accumulate()
         coco_eval.summarize()
-
-        coco_map = coco_eval.stats[0]
-
-        return coco_map
 
 
 def test(dataloader: DataLoader, device: _device, model: nn.Module, metric) -> None:
@@ -331,9 +335,8 @@ def test(dataloader: DataLoader, device: _device, model: nn.Module, metric) -> N
     test_box_loss = 0
     test_obj_loss = 0
     test_rpn_loss = 0
-
     with torch.no_grad():
-        for batch, (images, targets, image_ids) in enumerate(dataloader):
+        for images, targets, image_ids in dataloader:
             images = [image.to(device) for image in images]
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
@@ -349,17 +352,16 @@ def test(dataloader: DataLoader, device: _device, model: nn.Module, metric) -> N
 
             model.eval()
             preds = model(images)
-            # print(preds)
-            metric.update(preds, image_ids)
 
+            metric.update(preds, image_ids)
     test_loss /= num_batches
     test_cls_loss /= num_batches
     test_box_loss /= num_batches
     test_obj_loss /= num_batches
     test_rpn_loss /= num_batches
-
     print(f'Test Error: \n Avg loss: {test_loss:>8f} \n Class loss: {test_cls_loss:>8f} \n Box loss: {test_box_loss:>8f} \n Obj loss: {test_obj_loss:>8f} \n RPN loss: {test_rpn_loss:>8f} \n')
     metric.compute()
+    
     metric.reset()
     print()
 
@@ -384,25 +386,27 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
         shutil.rmtree(save_dir)
         os.makedirs(save_dir)
 
+    classes = ['wheat']
+
     model.eval()
-    indices = random.Random(36).choices(range(len(testset)), k=n_images)
-    for i in indices:
-        image, target, image_id = testset[i]
+    indices = random.choices(range(len(testset)), k=n_images)
+    for i in tqdm(indices):
+        image, _, image_id = testset[i]
         image = [image.to(device)]
-        preds = model(image)
+        pred = model(image)
 
         image = image[0].detach().cpu().numpy().transpose(1, 2, 0)
+        pred = {k: v.detach().cpu() for k, v in pred[0].items()}
 
         plt.imshow(image)
         ax = plt.gca()
 
-        preds = [{k: v.detach().cpu() for k, v in t.items()} for t in preds]
-        for score, (x1, y1, x2, y2) in zip(preds[0]['scores'], preds[0]['boxes']):
+        for box, category_id, score in zip(*pred.values()):
             if score >= conf_thr:
+                x1, y1, x2, y2 = box
                 w = x2 - x1
                 h = y2 - y1
-
-                category_id = preds[0]['labels']
+                category_id = category_id.item()
 
                 rect = patches.Rectangle(
                     (x1, y1),
@@ -414,9 +418,9 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
                 ax.add_patch(rect)
                 ax.text(
                     x1, y1,
-                    f'{category_id}: {score:.2f}',
+                    f'{classes[category_id-1]}: {score:.2f}',
                     c='white',
-                    size=6,
+                    size=10,
                     path_effects=[pe.withStroke(linewidth=2, foreground='green')],
                     family='sans-serif',
                     weight='semibold',
@@ -449,45 +453,46 @@ def run_pytorch(
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    split_dataset(csv_path=csv_path)
+    split_dataset(csv_path)
     
-    visualize_dataset(image_dir=train_image_dir, csv_path=train_csv_path, save_dir='examples/global-wheat-detection/train')
-    visualize_dataset(image_dir=train_image_dir, csv_path=test_csv_path, save_dir='examples/global-wheat-detection/test')
+    visualize_dataset(train_image_dir, train_csv_path, save_dir='examples/global-wheat-detection/train')
+    visualize_dataset(train_image_dir, test_csv_path, save_dir='examples/global-wheat-detection/test')
 
-    trainset = WheatDataset(
+    training_data = WheatDataset(
         image_dir=train_image_dir,
         csv_path=train_csv_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
-    testset = WheatDataset(
+    test_data = WheatDataset(
         image_dir=train_image_dir,
         csv_path=test_csv_path,
-        transform=ToTensor(),
+        transform=transforms.ToTensor(),
     )
 
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=1, collate_fn=collate_fn)
-    testloader = DataLoader(testset, batch_size=batch_size, num_workers=1, collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16, collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8, collate_fn=collate_fn)
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = fasterrcnn_resnet50_fpn(num_classes=1+1)
-    model.to(device)
+    
+    model = fasterrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1).to(device)
+    
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=0.005)
     metric = MeanAveragePrecision(csv_path=test_csv_path)
 
     for t in range(epochs):
         print(f'Epoch {t+1}\n-------------------------------')
-        train(trainloader, device, model, optimizer)
-        print()
-        test(testloader, device, model, metric)
+        train(train_dataloader, device, model, optimizer)
+        test(test_dataloader, device, model, metric)
     print('Done!')
 
     torch.save(model.state_dict(), 'wheat-faster-rcnn.pth')
     print('Saved PyTorch Model State to wheat-faster-rcnn.pth')
 
-    model = fasterrcnn_resnet50_fpn(num_classes=1+1)
+    model = fasterrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1)
     model.load_state_dict(torch.load('wheat-faster-rcnn.pth'))
     model.to(device)
 
-    visualize_predictions(testset, device, model, 'examples/global-wheat-detection/faster-rcnn')
+    visualize_predictions(test_data, device, model, 'examples/global-wheat-detection/faster-rcnn')
     
     
 class WheatDetectionModule(LightningModule):
@@ -501,7 +506,7 @@ class WheatDetectionModule(LightningModule):
         super().__init__()
 
         self.lr = lr
-        self.model = fasterrcnn_resnet50_fpn(num_classes=1+1)
+        self.model = fasterrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1)
         self.metric = MeanAveragePrecision(csv_path)
         
     def forward(self, x):
@@ -613,12 +618,12 @@ def run_pytorch_lightning(
     trainset = WheatDataset(
         image_dir=train_image_dir,
         csv_path=train_csv_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
     testset = WheatDataset(
         image_dir=train_image_dir,
         csv_path=test_csv_path,
-        transform=ToTensor(),
+        transform=transforms.ToTensor(),
     )
 
     trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=16, collate_fn=collate_fn)

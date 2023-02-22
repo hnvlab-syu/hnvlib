@@ -1,6 +1,6 @@
 import os
 
-from hnvlib.k_fashion import split_dataset, visualize_dataset, run_pytorch
+from hnvlib.k_fashion import split_dataset, visualize_dataset, run_pytorch, run_pytorch_lightning
 
 
 ROOT_DIR = '../../data/k-fashion'
@@ -25,7 +25,17 @@ def main():
     #     alpha=0.8
     # )
 
-    run_pytorch(
+    # run_pytorch(
+    #     json_path=JSON_PATH,
+    #     image_dir=IMAGE_DIR,
+    #     train_json_path=TRAIN_JSON_PATH,
+    #     test_json_path=VAL_JSON_PATH,
+    #     batch_size=12,
+    #     epochs=2,
+    #     lr=0.01
+    # )
+
+    run_pytorch_lightning(
         json_path=JSON_PATH,
         image_dir=IMAGE_DIR,
         train_json_path=TRAIN_JSON_PATH,

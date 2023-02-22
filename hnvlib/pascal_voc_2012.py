@@ -29,7 +29,7 @@ torch.set_float32_matmul_precision('medium')
 NUM_CLASSES = 20
 
 
-def split_dataset(label_dir: os.PathLike, save_dir: os.PathLike, split_rate: float = 0.2) -> None:
+def split_dataset(label_dir: os.PathLike, split_rate: float = 0.2) -> None:
     """Dirty-MNIST 데이터셋을 비율에 맞춰 train / test로 나눕니다.
     
     :param path: Dirty-MNIST 데이터셋 경로
@@ -37,23 +37,25 @@ def split_dataset(label_dir: os.PathLike, save_dir: os.PathLike, split_rate: flo
     :param split_rate: train과 test로 데이터 나누는 비율
     :type split_rate: float
     """
+    root_dir = os.path.dirname(label_dir)
+
     image_ids = []
     for path in glob(os.path.join(label_dir, '*.png')):
         file_name = os.path.split(path)[-1]
         image_id = os.path.splitext(file_name)[0]
         image_ids.append(image_id)
 
-    random.Random(36).shuffle(image_ids)
+    random.shuffle(image_ids)
 
     split_point = int(split_rate * len(image_ids))
 
     test_ids = image_ids[:split_point]
     train_ids = image_ids[split_point:]
 
-    train_df = pd.DataFrame({'image_id': train_ids})
-    train_df.to_csv(os.path.join(save_dir, 'train_answer.csv'), index=False)
     test_df = pd.DataFrame({'image_id': test_ids})
-    test_df.to_csv(os.path.join(save_dir, 'test_answer.csv'), index=False)
+    test_df.to_csv(os.path.join(root_dir, 'test_answer.csv'), index=False)
+    train_df = pd.DataFrame({'image_id': train_ids})
+    train_df.to_csv(os.path.join(root_dir, 'train_answer.csv'), index=False)
 
 
 class PascalVOC2012Dataset(Dataset):
@@ -71,11 +73,6 @@ class PascalVOC2012Dataset(Dataset):
         self.image_dir = image_dir
         self.label_dir = label_dir
 
-        # for global_wheat_detection.py refactoring
-        # grouped = df.groupby(by='ImageId')
-        # self.grouped_dict = {image_id: group for image_id, group in grouped}
-        # self.image_ids = tuple(self.grouped_dict.keys())
-
         self.image_ids = df['image_id'].tolist()
 
         self.transform = transform
@@ -90,7 +87,7 @@ class PascalVOC2012Dataset(Dataset):
         image = Image.open(os.path.join(self.image_dir, f'{image_id}.jpg')).convert('RGB')
         mask = Image.open(os.path.join(self.label_dir, f'{image_id}.png'))
 
-        mask = np.array(mask)
+        mask = np.asarray(mask)
         height, width = mask.shape
 
         target = np.zeros((height, width, NUM_CLASSES+1))
@@ -154,7 +151,7 @@ def visualize_dataset(
         mask_transform=get_mask_transform(size=size)
     )
 
-    indices = random.Random(36).choices(range(len(dataset)), k=n_images)
+    indices = random.choices(range(len(dataset)), k=n_images)
     for i in tqdm(indices):
         image, target, meta_data = dataset[i]
         image = (image * 255.0).type(torch.uint8)
@@ -174,17 +171,18 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Mod
         images = images.to(device)
         targets = targets.to(device)
 
-        pred = model(images)['out']
-        pred = torch.softmax(pred, dim=1)
-        loss = loss_fn(pred, targets)
+        preds = model(images)['out']
+        preds = torch.softmax(preds, dim=1)
+        loss = loss_fn(preds, targets)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         if batch % 10 == 0:
+            loss = loss.item()
             current = batch * len(images)
-            print(f'loss: {loss.item():>4f}  [{current:>5d}/{size:>5d}]')
+            print(f'loss: {loss:>7f}  [{current:>5d}/{size:>5d}]')
 
 
 def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Module, metric) -> None:
@@ -206,16 +204,16 @@ def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Modu
         for images, targets, _ in dataloader:
             images = images.to(device)
             targets = targets.to(device)
-            # print(targets.unique())
 
-            pred = model(images)['out']
-            pred = torch.softmax(pred, dim=1)
-            test_loss += loss_fn(pred, targets).item()
-            
-            metric.update(pred, targets.argmax(dim=1))
+            preds = model(images)['out']
+            preds = torch.softmax(preds, dim=1)
+
+            test_loss += loss_fn(preds, targets).item()
+            metric.update(preds, targets.argmax(dim=1))
     test_loss /= num_batches
     miou = metric.compute()
     print(f'Test Error: \n mIoU: {(100*miou):>0.1f}, Avg loss: {test_loss:>8f} \n')
+    
     metric.reset()
     print()
 
@@ -241,7 +239,7 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
         os.makedirs(save_dir)
 
     model.eval()
-    indices = random.Random(36).choices(range(len(testset)), k=n_images)
+    indices = random.choices(range(len(testset)), k=n_images)
     for i in tqdm(indices):
         image, _, meta_data = testset[i]
         image_id, height, width = meta_data.values()
@@ -280,7 +278,7 @@ def run_pytorch(
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    split_dataset(label_dir, root_dir)
+    split_dataset(label_dir)
 
     visualize_dataset(image_dir, label_dir, train_csv_path, size, save_dir='examples/pascal-voc-2012/train', alpha=0.8)
     visualize_dataset(image_dir, label_dir, test_csv_path, size, save_dir='examples/pascal-voc-2012/test', alpha=0.8)
@@ -318,11 +316,11 @@ def run_pytorch(
         test(test_dataloader, device, model, loss_fn, metric)
     print('Done!')
 
-    torch.save(model.state_dict(), 'pascal_voc_2012_deeplabv3.pth')
-    print('Saved PyTorch Model State to pascal_voc_2012_deeplabv3.pth')
+    torch.save(model.state_dict(), 'pascal-voc-2012-deeplabv3.pth')
+    print('Saved PyTorch Model State to pascal-voc-2012-deeplabv3.pth')
 
     model = deeplabv3_resnet50(num_classes=NUM_CLASSES+1)
-    model.load_state_dict(torch.load('pascal_voc_2012_deeplabv3.pth'))
+    model.load_state_dict(torch.load('pascal-voc-2012-deeplabv3.pth'))
     model.to(device)
 
     visualize_predictions(test_data, device, model, 'examples/pascal-voc-2012/deeplabv3', alpha=0.8)

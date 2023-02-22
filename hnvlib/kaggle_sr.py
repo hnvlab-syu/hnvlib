@@ -15,7 +15,7 @@ import torch
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
-from torchvision.transforms import ToTensor
+from torchvision import transforms
 import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
@@ -26,7 +26,7 @@ from torchmetrics import PeakSignalNoiseRatio
 torch.set_float32_matmul_precision('medium')
 
 
-def split_dataset(label_dir: os.PathLike, save_dir: os.PathLike, split_rate: float = 0.2) -> None:
+def split_dataset(label_dir: os.PathLike, split_rate: float = 0.2) -> None:
     """Dirty-MNIST 데이터셋을 비율에 맞춰 train / test로 나눕니다.
     
     :param path: Dirty-MNIST 데이터셋 경로
@@ -34,23 +34,25 @@ def split_dataset(label_dir: os.PathLike, save_dir: os.PathLike, split_rate: flo
     :param split_rate: train과 test로 데이터 나누는 비율
     :type split_rate: float
     """
+    root_dir = os.path.dirname(label_dir)
+
     image_ids = []
     for path in glob(os.path.join(label_dir, '*.png')):
         file_name = os.path.split(path)[-1]
         image_id = os.path.splitext(file_name)[0]
         image_ids.append(image_id)
 
-    random.Random(36).shuffle(image_ids)
+    random.shuffle(image_ids)
 
     split_point = int(split_rate * len(image_ids))
 
     test_ids = image_ids[:split_point]
     train_ids = image_ids[split_point:]
 
-    train_df = pd.DataFrame({'image_id': train_ids})
-    train_df.to_csv(os.path.join(save_dir, 'train_answer.csv'), index=False)
     test_df = pd.DataFrame({'image_id': test_ids})
-    test_df.to_csv(os.path.join(save_dir, 'test_answer.csv'), index=False)
+    test_df.to_csv(os.path.join(root_dir, 'test_answer.csv'), index=False)
+    train_df = pd.DataFrame({'image_id': train_ids})
+    train_df.to_csv(os.path.join(root_dir, 'train_answer.csv'), index=False)
 
 
 class KaggleSRDataset(Dataset):
@@ -109,10 +111,10 @@ def visualize_dataset(
         lr_dir=lr_dir,
         hr_dir=hr_dir,
         csv_path=csv_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
 
-    indices = random.Random(36).choices(range(len(dataset)), k=n_images)
+    indices = random.choices(range(len(dataset)), k=n_images)
     for i in tqdm(indices):
         lr_image, hr_image, image_id = dataset[i]
         _, lr_h, lr_w = lr_image.shape
@@ -125,7 +127,7 @@ def visualize_dataset(
         background = (background * 255.0).type(torch.uint8)
         hr_image = (hr_image * 255.0).type(torch.uint8)
         
-        fig, axs = plt.subplots(ncols=2, squeeze=False)
+        _, axs = plt.subplots(ncols=2, squeeze=False)
         for i, img in enumerate([background, hr_image]):
             img = img.detach()
             img = TF.to_pil_image(img)
@@ -140,7 +142,7 @@ def visualize_dataset(
 
 class ResidualBlock(nn.Module):
     def __init__(self, channels):
-        super(ResidualBlock, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, stride=1, padding=1, bias=True)
         self.bn1 = nn.BatchNorm2d(channels)
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, stride=1, padding=1, bias=True)
@@ -157,7 +159,7 @@ class ResidualBlock(nn.Module):
 
 class EDSR(nn.Module):
     def __init__(self):
-        super(EDSR, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=256, kernel_size=3, padding=1)
         self.res_blocks = nn.Sequential(
             *[ResidualBlock(256) for _ in range(32)]
@@ -188,16 +190,17 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Mod
         lr_images = lr_images.to(device)
         hr_images = hr_images.to(device)
 
-        pred = model(lr_images)
-        loss = loss_fn(pred, hr_images)
+        preds = model(lr_images)
+        loss = loss_fn(preds, hr_images)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         if batch % 2 == 0:
+            loss = loss.item()
             current = batch * len(lr_images)
-            print(f'loss: {loss.item():>4f}  [{current:>5d}/{size:>5d}]')
+            print(f'loss: {loss:>7f}  [{current:>5d}/{size:>5d}]')
 
 
 def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Module, metric) -> None:
@@ -220,14 +223,16 @@ def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Modu
             lr_images = lr_images.to(device)
             hr_images = hr_images.to(device)
 
-            pred = model(lr_images)
-            loss = loss_fn(pred, hr_images)
-            test_loss += loss.item()
-            
-            metric.update(pred, hr_images)
+            preds = model(lr_images)
+
+            test_loss += loss_fn(preds, hr_images).item()
+            metric.update(preds, hr_images)
     test_loss /= num_batches
     psnr = metric.compute()
     print(f'Test Error: \n PSNR: {psnr:>0.1f}, Avg loss: {test_loss:>8f} \n')
+
+    metric.reset()
+    print()
 
 
 def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_dir: os.PathLike, n_images: int = 10) -> None:
@@ -251,7 +256,7 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
         os.makedirs(save_dir)
 
     model.eval()
-    indices = random.Random(36).choices(range(len(testset)), k=n_images)
+    indices = random.choices(range(len(testset)), k=n_images)
     for i in tqdm(indices):
         lr_image, hr_image, image_id = testset[i]
 
@@ -262,7 +267,7 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
         hr_image = (hr_image * 255.0).type(torch.uint8)
         
         fig, axs = plt.subplots(ncols=2, squeeze=False)
-        for i, img in enumerate([pred, hr_image]):
+        for i, img in enumerate([hr_image, pred]):
             img = img.detach()
             img = TF.to_pil_image(img)
             axs[0, i].imshow(np.asarray(img))
@@ -281,7 +286,8 @@ def run_pytorch(
     train_csv_path: os.PathLike,
     test_csv_path: os.PathLike,
     batch_size: int,
-    epochs: int
+    epochs: int,
+    lr: float
 ) -> None:
     """학습/추론 파이토치 파이프라인입니다.
 
@@ -290,7 +296,7 @@ def run_pytorch(
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    split_dataset(hr_dir, root_dir)
+    split_dataset(hr_dir)
 
     visualize_dataset(lr_dir, hr_dir, train_csv_path, save_dir='examples/kaggle-sr/train')
     visualize_dataset(lr_dir, hr_dir, test_csv_path, save_dir='examples/kaggle-sr/test')
@@ -299,14 +305,14 @@ def run_pytorch(
         lr_dir=lr_dir,
         hr_dir=hr_dir,
         csv_path=train_csv_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
 
     test_data = KaggleSRDataset(
         lr_dir=lr_dir,
         hr_dir=hr_dir,
         csv_path=test_csv_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
 
     train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16)
@@ -317,7 +323,7 @@ def run_pytorch(
     model = EDSR().to(device)
 
     loss_fn = nn.MSELoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
     metric = PeakSignalNoiseRatio().to(device)
 
     for t in range(epochs):
@@ -326,11 +332,11 @@ def run_pytorch(
         test(test_dataloader, device, model, loss_fn, metric)
     print('Done!')
 
-    torch.save(model.state_dict(), 'kaggle_sr_edsr.pth')
-    print('Saved PyTorch Model State to kaggle_sr_edsr.pth')
+    torch.save(model.state_dict(), 'kaggle-sr-edsr.pth')
+    print('Saved PyTorch Model State to kaggle-sr-edsr.pth')
 
     model = EDSR()
-    model.load_state_dict(torch.load('kaggle_sr_edsr.pth'))
+    model.load_state_dict(torch.load('kaggle-sr-edsr.pth'))
     model.to(device)
 
     visualize_predictions(test_data, device, model, 'examples/kaggle-sr/edsr')
@@ -430,14 +436,14 @@ def run_pytorch_lightning(
         lr_dir=lr_dir,
         hr_dir=hr_dir,
         csv_path=train_csv_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
 
     test_data = KaggleSRDataset(
         lr_dir=lr_dir,
         hr_dir=hr_dir,
         csv_path=test_csv_path,
-        transform=ToTensor()
+        transform=transforms.ToTensor()
     )
 
     train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16)

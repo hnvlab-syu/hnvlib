@@ -13,18 +13,21 @@ from pytorch_lightning import Trainer
 from torchmetrics import Accuracy
 
 
-class FashionMNISTNetwork(nn.Module):
+NUM_CLASSES = 10
+
+
+class NeuralNetwork(nn.Module):
     """FashionMNIST 데이터를 훈련할 모델을 정의합니다.
     """
-    def __init__(self) -> None:
-        super(FashionMNISTNetwork, self).__init__()
+    def __init__(self, num_classes: int) -> None:
+        super().__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(28*28, 512),
             nn.ReLU(),
             nn.Linear(512, 512),
             nn.ReLU(),
-            nn.Linear(512, 10),
+            nn.Linear(512, num_classes),
         )
 
     def forward(self, x: Tensor) -> Tensor:
@@ -56,18 +59,20 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Mod
     """
     size = len(dataloader.dataset)
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch, (images, targets) in enumerate(dataloader):
+        images = images.to(device)
+        targets = targets.to(device)
 
-        pred = model(X)
-        loss = loss_fn(pred, y)
+        preds = model(images)
+        loss = loss_fn(preds, targets)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         if batch % 100 == 0:
-            loss, current = loss.item(), batch * len(X)
+            loss = loss.item()
+            current = batch * len(images)
             print(f'loss: {loss:>7f}  [{current:>5d}/{size:>5d}]')
 
 
@@ -89,11 +94,14 @@ def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Modu
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for X, y in dataloader:
-            X, y = X.to(device), y.to(device)
-            pred = model(X)
-            test_loss += loss_fn(pred, y).item()
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        for images, targets in dataloader:
+            images = images.to(device)
+            targets = targets.to(device)
+
+            preds = model(images)
+
+            test_loss += loss_fn(preds, targets).item()
+            correct += (preds.argmax(1) == targets).float().sum().item()
     test_loss /= num_batches
     correct /= size
     print(f'Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n')
@@ -121,15 +129,16 @@ def predict(test_data: Dataset, model: nn.Module) -> None:
     ]
 
     model.eval()
-    x = test_data[0][0]
-    y = test_data[0][1]
+    image = test_data[0][0]
+    target = test_data[0][1]
     with torch.no_grad():
-        pred = model(x)
-        predicted, actual = classes[pred[0].argmax(0)], classes[y]
+        pred = model(image)
+        predicted = classes[pred[0].argmax(0)]
+        actual = classes[target]
         print(f'Predicted: "{predicted}", Actual: "{actual}"')
 
 
-def run_pytorch(batch_size: int, epochs: int) -> None:
+def run_pytorch(batch_size: int, epochs: int, lr: float) -> None:
     """학습/추론 파이토치 파이프라인입니다.
 
     :param batch_size: 학습 및 추론 데이터셋의 배치 크기
@@ -156,10 +165,10 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model = FashionMNISTNetwork().to(device)
+    model = NeuralNetwork(num_classes=NUM_CLASSES).to(device)
 
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
 
     for t in range(epochs):
         print(f'Epoch {t+1}\n-------------------------------')
@@ -167,20 +176,21 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
         test(test_dataloader, device, model, loss_fn)
     print('Done!')
 
-    torch.save(model.state_dict(), 'model.pth')
-    print('Saved PyTorch Model State to model.pth')
+    torch.save(model.state_dict(), 'fashion-mnist-net.pth')
+    print('Saved PyTorch Model State to fashion-mnist-net.pth')
 
-    model = FashionMNISTNetwork()
-    model.load_state_dict(torch.load('model.pth'))
+    model = NeuralNetwork(num_classes=NUM_CLASSES)
+    model.load_state_dict(torch.load('fashion-mnist-net.pth'))
+
     predict(test_data, model)
 
 
 class FashionMNISTNetworkModule(pl.LightningModule):
     def __init__(self) -> None:
         super(FashionMNISTNetworkModule, self).__init__()
-        self.model = FashionMNISTNetwork()
+        self.model = NeuralNetwork(num_classes=NUM_CLASSES)
         self.loss_fn = nn.CrossEntropyLoss()
-        self.metric = Accuracy(num_classes=10)
+        self.metric = Accuracy(num_classes=NUM_CLASSES)
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         """옵티마이저를 정의합니다.

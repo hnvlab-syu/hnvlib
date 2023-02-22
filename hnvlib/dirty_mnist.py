@@ -21,7 +21,10 @@ from pytorch_lightning import Trainer
 from torchmetrics import Accuracy
 
 
-def split_dataset(path: os.PathLike, split_rate: float = 0.2) -> None:
+NUM_CLASSES = 26
+
+
+def split_dataset(csv_path: os.PathLike, split_rate: float = 0.2) -> None:
     """Dirty-MNIST 데이터셋을 비율에 맞춰 train / test로 나눕니다.
     
     :param path: Dirty-MNIST 데이터셋 경로
@@ -29,16 +32,23 @@ def split_dataset(path: os.PathLike, split_rate: float = 0.2) -> None:
     :param split_rate: train과 test로 데이터 나누는 비율
     :type split_rate: float
     """
-    df = pd.read_csv(path)
+    root_dir = os.path.dirname(csv_path)
+
+    df = pd.read_csv(csv_path)
     size = len(df)
     indices = list(range(size))
+
     random.shuffle(indices)
 
     split_point = int(split_rate * size)
-    test_df = df.loc[indices[:split_point]]
-    test_df.to_csv('data/dirty-mnist/test_answer.csv', index=False)
-    train_df = df.loc[indices[split_point:]]
-    train_df.to_csv('data/dirty-mnist/train_answer.csv', index=False)
+
+    test_ids = indices[:split_point]
+    train_ids = indices[split_point:]
+
+    test_df = df.loc[test_ids]
+    test_df.to_csv(os.path.join(root_dir, 'test_answer.csv'), index=False)
+    train_df = df.loc[train_ids]
+    train_df.to_csv(os.path.join(root_dir, 'train_answer.csv'), index=False)
 
 
 class DirtyMnistDataset(Dataset):
@@ -46,9 +56,9 @@ class DirtyMnistDataset(Dataset):
     """
     def __init__(
         self,
-        dir: os.PathLike,
-        image_ids: os.PathLike,
-        transforms: Sequence[Callable]
+        image_dir: os.PathLike,
+        csv_path: os.PathLike,
+        transform: Sequence[Callable]
     ) -> None:
         """데이터 정보를 불러와 정답(label)과 각각 데이터의 이름(image_id)를 저장
         
@@ -61,11 +71,11 @@ class DirtyMnistDataset(Dataset):
         """
         super().__init__()
 
-        self.dir = dir
-        self.transforms = transforms
+        self.image_dir = image_dir
+        self.transform = transform
 
         self.labels = {}
-        with open(image_ids, 'r') as f:
+        with open(csv_path, 'r') as f:
             reader = csv.reader(f)
             next(reader)
             for row in reader:
@@ -90,25 +100,46 @@ class DirtyMnistDataset(Dataset):
         :rtype: Tuple[Tensor]
         """
         image_id = self.image_ids[index]
-        image = Image.open(
-            os.path.join(self.dir, f'{str(image_id).zfill(5)}.png')).convert('RGB')
+        image = Image.open(os.path.join(self.image_dir, f'{str(image_id).zfill(5)}.png')).convert('RGB')
         target = np.array(self.labels.get(image_id))
 
-        if self.transforms is not None:
-            image = self.transforms(image)
+        if self.transform is not None:
+            image = self.transform(image)
 
         return image, target
 
 
-class DirtyMnistModel(nn.Module):
+def get_train_transform():
+    return transforms.Compose([
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.5),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            [0.485, 0.456, 0.406],
+            [0.229, 0.224, 0.225]
+        )
+    ])
+
+
+def get_test_transform():
+    return transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(
+            [0.485, 0.456, 0.406],
+            [0.229, 0.224, 0.225]
+        )
+    ])
+
+
+class MultiLabelResNet(nn.Module):
     """Dirty-MNIST 데이터를 훈련할 모델을 정의합니다.
     모델은 torchvision에서 제공하는 ResNet-50을 지원합니다.
     Model Link : https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py
     """
-    def __init__(self) -> None:
+    def __init__(self, num_classes: int) -> None:
         super().__init__()
-        self.resnet = resnet50(pretrained=True)
-        self.classifier = nn.Linear(1000, 26)
+        self.resnet = resnet50()
+        self.classifier = nn.Linear(1000, num_classes)
 
     def forward(self, x: Tensor) -> Tensor:
         """피드 포워드(순전파)를 진행하는 함수입니다.
@@ -140,18 +171,21 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Mod
     """
     size = len(dataloader.dataset)
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
+    for batch, (images, targets) in enumerate(dataloader):
+        images = images.to(device)
+        targets = targets.to(device)
 
-        pred = model(X)
-        loss = loss_fn(pred, y)
+        preds = model(images)
+        # print(targets, preds)
+        loss = loss_fn(preds, targets.float())
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         if batch % 100 == 0:
-            loss, current = loss.item(), batch * len(X)
+            loss = loss.item()
+            current = batch * len(images)
             print(f'loss: {loss:>7f}  [{current:>5d}/{size:>5d}]')
 
 
@@ -167,19 +201,23 @@ def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Modu
     :param loss_fn: 훈련에 사용되는 오차 함수
     :type loss_fn: nn.Module
     """
+    size = len(dataloader.dataset)
     num_batches = len(dataloader)
     model.eval()
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for X, y in dataloader:
-            X, y = X.to(device), y.to(device)
-            pred = model(X)
-            test_loss += loss_fn(pred, y).item()
-            pred = pred > 0.5
-            correct += (pred == y).float().mean().item()
+        for images, targets in dataloader:
+            images = images.to(device)
+            targets = targets.to(device)
+
+            preds = model(images)
+            # print(targets, preds)
+
+            test_loss += loss_fn(preds, targets.float()).item()
+            correct += ((torch.sigmoid(preds) >= 0.5) == targets).float().mean(axis=1).sum().item()
     test_loss /= num_batches
-    correct /= num_batches
+    correct /= size
     print(f'Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n')
 
 
@@ -195,17 +233,26 @@ def predict(test_data: Dataset, model: nn.Module) -> None:
     classes = list(ascii_lowercase)
 
     model.eval()
-    x = test_data[1][0].unsqueeze(0)
-    y = test_data[1][1]
+    image = test_data[1][0].unsqueeze(0)
+    target = test_data[1][1]
     with torch.no_grad():
-        preds = model(x) > 0.5
-        print(preds)
-        preds = preds.squeeze().nonzero()
-        actual = y.nonzero()[0]
-        print(f'Predicted: "{[classes[pred] for pred in preds]}", Actual: "{[classes[a] for a in actual]}"')
+        pred = model(image) > 0.5
+        print(pred)
+        pred = pred.squeeze().nonzero()
+        predicted = [classes[p] for p in pred]
+        actual = [classes[a] for a in target.nonzero()[0]]
+        print(f'Predicted: "{predicted}", Actual: "{actual}"')
 
 
-def run_pytorch(batch_size: int, epochs: int) -> None:
+def run_pytorch(
+    csv_path: os.PathLike,
+    image_dir: os.PathLike,
+    train_csv_path: os.PathLike,
+    test_csv_path: os.PathLike,
+    batch_size: int,
+    epochs: int,
+    lr: float
+) -> None:
     """학습/추론 파이토치 파이프라인입니다.
 
     :param batch_size: 학습 및 추론 데이터셋의 배치 크기
@@ -213,46 +260,28 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    split_dataset('data/dirty-mnist/dirty_mnist_2nd_answer.csv')
+    split_dataset(csv_path)
 
-    transforms_train = transforms.Compose([
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            [0.485, 0.456, 0.406],
-            [0.229, 0.224, 0.225]
-        )
-    ])
-
-    transforms_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(
-            [0.485, 0.456, 0.406],
-            [0.229, 0.224, 0.225]
-        )
-    ])
-
-    trainset = DirtyMnistDataset(
-        'data/dirty-mnist/train',
-        'data/dirty-mnist/train_answer.csv',
-        transforms_train
+    training_data = DirtyMnistDataset(
+        image_dir=image_dir,
+        csv_path=train_csv_path,
+        transform=get_train_transform()
     )
-    testset = DirtyMnistDataset(
-        'data/dirty-mnist/train',
-        'data/dirty-mnist/test_answer.csv',
-        transforms_test
+    test_data = DirtyMnistDataset(
+        image_dir=image_dir,
+        csv_path=test_csv_path,
+        transform=get_test_transform()
     )
 
-    train_dataloader = DataLoader(trainset, batch_size=batch_size, num_workers=8)
-    test_dataloader = DataLoader(testset, batch_size=batch_size, num_workers=4)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model = DirtyMnistModel().to(device)
+    model = MultiLabelResNet(num_classes=NUM_CLASSES).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = nn.MultiLabelSoftMarginLoss()
+    loss_fn = nn.BCEWithLogitsLoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
 
     for t in range(epochs):
         print(f'Epoch {t+1}\n-------------------------------')
@@ -260,12 +289,13 @@ def run_pytorch(batch_size: int, epochs: int) -> None:
         test(test_dataloader, device, model, loss_fn)
     print('Done!')
 
-    torch.save(model.state_dict(), 'dirty-mnist.pth')
-    print('Saved PyTorch Model State to dirty-mnist.pth')
+    torch.save(model.state_dict(), 'dirty-mnist-resnet.pth')
+    print('Saved PyTorch Model State to dirty-mnist-resnet.pth')
 
-    model = DirtyMnistModel()
-    model.load_state_dict(torch.load('dirty-mnist.pth'))
-    predict(testset, model)
+    model = MultiLabelResNet(num_classes=NUM_CLASSES)
+    model.load_state_dict(torch.load('dirty-mnist-resnet.pth'))
+
+    predict(test_data, model)
 
 
 class DirtyMnistModule(pl.LightningModule):
@@ -273,9 +303,9 @@ class DirtyMnistModule(pl.LightningModule):
     """
     def __init__(self) -> None:
         super(DirtyMnistModule, self).__init__()
-        self.model = DirtyMnistModel()
+        self.model = MultiLabelResNet(num_classes=NUM_CLASSES)
         self.loss_fn = nn.MultiLabelSoftMarginLoss()
-        self.metric = Accuracy(num_classes=26)
+        self.metric = Accuracy(num_classes=NUM_CLASSES)
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         """옵티마이저를 정의합니다.
