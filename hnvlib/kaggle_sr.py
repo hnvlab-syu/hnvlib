@@ -18,7 +18,6 @@ import torch.nn.functional as F
 from torchvision import transforms
 import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
-from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from torchmetrics import PeakSignalNoiseRatio
 
@@ -345,11 +344,13 @@ def run_pytorch(
 class KaggleSRModule(pl.LightningModule):
     """모델과 학습/추론 코드가 포함된 파이토치 라이트닝 모듈입니다.
     """
-    def __init__(self) -> None:
-        super(KaggleSRModule, self).__init__()
+    def __init__(self, lr: Optional[float] = None) -> None:
+        super().__init__()
         self.model = EDSR()
         self.loss_fn = nn.MSELoss()
         self.metric = PeakSignalNoiseRatio()
+
+        self.lr = lr if lr is not None else 1e-2
 
     def configure_optimizers(self):
         """옵티마이저를 정의합니다.
@@ -357,7 +358,7 @@ class KaggleSRModule(pl.LightningModule):
         :return: 파이토치 옵티마이저
         :rtype: torch.optim.Optimizer
         """
-        return optim.SGD(self.parameters(), lr=0.01, momentum=0.9)
+        return optim.SGD(self.parameters(), lr=self.lr, momentum=0.9)
 
     def forward(self, x: Tensor) -> Tensor:
         """피드 포워딩 함수
@@ -381,8 +382,8 @@ class KaggleSRModule(pl.LightningModule):
         """
         lr_images, hr_images, _ = batch
 
-        pred = self.model(lr_images)
-        loss = self.loss_fn(pred, hr_images)
+        preds = self.model(lr_images)
+        loss = self.loss_fn(preds, hr_images)
 
         self.log('train_loss', loss, prog_bar=True)
 
@@ -400,9 +401,9 @@ class KaggleSRModule(pl.LightningModule):
         """
         lr_images, hr_images, _ = batch
 
-        pred = self.model(lr_images)
-        loss = self.loss_fn(pred, hr_images)
-        self.metric.update(pred, hr_images)
+        preds = self.model(lr_images)
+        loss = self.loss_fn(preds, hr_images)
+        self.metric.update(preds, hr_images)
 
         self.log('val_loss', loss, prog_bar=True)
 
@@ -426,6 +427,7 @@ def run_pytorch_lightning(
     test_csv_path: os.PathLike,
     batch_size: int,
     epochs: int,
+    lr: float
 ) -> None:
     split_dataset(hr_dir, root_dir)
 
@@ -449,15 +451,15 @@ def run_pytorch_lightning(
     train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
-    model = KaggleSRModule()
+    model = KaggleSRModule(lr=lr)
     wandb_logger = WandbLogger()
-    trainer = Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
+    trainer = pl.Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
     trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
-    trainer.save_checkpoint('kaggle_sr_edsr.ckpt')
-    print('Saved PyTorch Lightning Model State to kaggle_sr_edsr.ckpt')
+    trainer.save_checkpoint('kaggle-sr-edsr.ckpt')
+    print('Saved PyTorch Lightning Model State to kaggle-sr-edsr.ckpt')
 
-    model = KaggleSRModule.load_from_checkpoint(checkpoint_path='kaggle_sr_edsr.ckpt')
+    model = KaggleSRModule.load_from_checkpoint(checkpoint_path='kaggle-sr-edsr.ckpt')
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
     

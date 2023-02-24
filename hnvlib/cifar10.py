@@ -2,14 +2,15 @@
 CIFAR-10 Dataset Link : https://www.cs.toronto.edu/~kriz/cifar.html
 """
 
-from typing import Dict, List, TypeVar
+from typing import Dict, List, TypeVar, Optional
+
 import torch
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 from torchvision import transforms, datasets
 import pytorch_lightning as pl
-from pytorch_lightning import Trainer
+from pytorch_lightning.loggers import WandbLogger
 from torchmetrics import Accuracy
 
 
@@ -199,11 +200,13 @@ def run_pytorch(batch_size: int, epochs: int, lr: float) -> None:
 class CIFARNetworkModule(pl.LightningModule):
     """모델과 학습/추론 코드가 포함된 파이토치 라이트닝 모듈입니다.
     """
-    def __init__(self) -> None:
-        super(CIFARNetworkModule, self).__init__()
+    def __init__(self, lr: Optional[float] = None) -> None:
+        super().__init__()
         self.model = LeNet(num_classes=NUM_CLASSES)
         self.loss_fn = nn.CrossEntropyLoss()
         self.metric = Accuracy(num_classes=NUM_CLASSES)
+        
+        self.lr = lr if lr is not None else 0.01
 
     def configure_optimizers(self) -> _Optimizer:
         """옵티마이저를 정의합니다.
@@ -211,7 +214,7 @@ class CIFARNetworkModule(pl.LightningModule):
         :return: 파이토치 옵티마이저
         :rtype: torch.optim.Optimizer
         """
-        return optim.SGD(self.parameters(), lr=0.01, momentum=0.9)
+        return optim.SGD(self.parameters(), lr=self.lr, momentum=0.9)
 
     def forward(self, x: Tensor) -> Tensor:
         """피드 포워딩 함수
@@ -233,10 +236,10 @@ class CIFARNetworkModule(pl.LightningModule):
         :return: 훈련 오차 데이터
         :rtype: Dict[str, float]
         """
-        X, y = batch
+        images, targets = batch
 
-        pred = self(X)
-        loss = self.loss_fn(pred, y)
+        preds = self(images)
+        loss = self.loss_fn(preds, targets)
 
         self.log('train_loss', loss, prog_bar=True)
 
@@ -252,11 +255,11 @@ class CIFARNetworkModule(pl.LightningModule):
         :return: 검증 오차 데이터
         :rtype: Dict[str, float]
         """
-        X, y = batch
+        images, targets = batch
 
-        pred = self(X)
-        loss = self.loss_fn(pred, y)
-        self.metric.update(pred, y)
+        preds = self(images)
+        loss = self.loss_fn(preds, targets)
+        self.metric.update(preds, targets)
 
         self.log('val_loss', loss, prog_bar=True)
 
@@ -272,7 +275,7 @@ class CIFARNetworkModule(pl.LightningModule):
         self.metric.reset()
 
 
-def run_pytorch_lightning(batch_size: int, epochs: int) -> None:
+def run_pytorch_lightning(batch_size: int, epochs: int, lr: float) -> None:
     """학습/추론 파이토치 라이트닝 파이프라인입니다.
 
     :param batch_size: 학습 및 추론 데이터셋의 배치 크기
@@ -299,15 +302,17 @@ def run_pytorch_lightning(batch_size: int, epochs: int) -> None:
         transform=transform,
     )
 
-    train_dataloader = DataLoader(training_data, batch_size=batch_size, num_workers=16)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
-    model = CIFARNetworkModule()
-    trainer = Trainer(max_epochs=epochs, gpus=1)
+    model = CIFARNetworkModule(lr=lr)
+    wandb_logger = WandbLogger()
+    trainer = pl.Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
     trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
-    trainer.save_checkpoint('cifar_net.ckpt')
-    print('Saved PyTorch Lightning Model State to cifar_net.ckpt')
+    trainer.save_checkpoint('cifar-net-lenet.ckpt')
+    print('Saved PyTorch Lightning Model State to cifar-net-lenet.ckpt')
 
-    model = CIFARNetworkModule.load_from_checkpoint(checkpoint_path='cifar_net.ckpt')
+    model = CIFARNetworkModule.load_from_checkpoint(checkpoint_path='cifar-net-lenet.ckpt')
+    
     predict(test_data, model)

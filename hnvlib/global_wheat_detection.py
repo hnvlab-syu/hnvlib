@@ -13,7 +13,6 @@ from ast import literal_eval
 import pandas as pd
 from PIL import Image
 from tqdm import tqdm
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.patheffects as pe
@@ -21,14 +20,13 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 import torch
-import torchvision
 from torch import Tensor, nn
 from torch.utils.data import Dataset, DataLoader
 from torch import optim
 from torchvision import transforms
 from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
-from pytorch_lightning import LightningModule, Trainer
+import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 
 
@@ -278,7 +276,7 @@ class MeanAveragePrecision:
                 })
                 n_id += 1
 
-        res['categories'].extend([{'id': 0, 'name': '_background_'}, {'id': 1, 'name': 'wheat'}])
+        res['categories'].extend([{'id': 1, 'name': 'wheat'}])
             
         root_dir = os.path.split(csv_path)[0]
         save_path = os.path.join(root_dir, 'coco_annotations.json')
@@ -495,8 +493,8 @@ def run_pytorch(
     visualize_predictions(test_data, device, model, 'examples/global-wheat-detection/faster-rcnn')
     
     
-class WheatDetectionModule(LightningModule):
-    def __init__(self, csv_path, lr):
+class WheatDetectionModule(pl.LightningModule):
+    def __init__(self, csv_path, lr: Optional[float] = None):
         """_summary_
 
         Args:
@@ -504,10 +502,23 @@ class WheatDetectionModule(LightningModule):
             lr (_type_): _description_
         """
         super().__init__()
-
-        self.lr = lr
         self.model = fasterrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1)
         self.metric = MeanAveragePrecision(csv_path)
+        
+        self.lr = lr if lr is not None else 1e-2
+
+    def configure_optimizers(self):
+        """_summary_
+
+        Returns:
+            _type_: _description_
+        """
+        return torch.optim.SGD(
+            self.model.parameters(),
+            lr=self.lr,
+            momentum=0.9,
+            weight_decay=0.005,
+        )
         
     def forward(self, x):
         """_summary_
@@ -537,7 +548,7 @@ class WheatDetectionModule(LightningModule):
         loss_dict = self.model(images, targets)
         loss = sum(loss for loss in loss_dict.values())
 
-        self.log_dict(loss_dict)
+        self.log_dict(loss_dict, prog_bar=True)
 
         return {'loss': loss, 'log': loss_dict}
     
@@ -562,8 +573,8 @@ class WheatDetectionModule(LightningModule):
         preds = self.model(images)
         self.metric.update(preds, image_ids)
 
-        self.log('val_loss', loss)
-        self.log_dict(loss_dict)
+        self.log('val_loss', loss, prog_bar=True)
+        self.log_dict(loss_dict, prog_bar=True)
 
         return {'val_loss': loss, 'log': loss_dict}
     
@@ -575,19 +586,6 @@ class WheatDetectionModule(LightningModule):
         """
         self.metric.compute()
         self.metric.reset()
-    
-    def configure_optimizers(self):
-        """_summary_
-
-        Returns:
-            _type_: _description_
-        """
-        return torch.optim.SGD(
-            self.model.parameters(),
-            lr=self.lr,
-            momentum=0.9,
-            weight_decay=0.005,
-        )
 
 
 def run_pytorch_lightning(
@@ -610,33 +608,35 @@ def run_pytorch_lightning(
         epochs (int): _description_
         lr (float): _description_
     """
-    split_dataset(csv_path=csv_path)
+    split_dataset(csv_path)
     
-    visualize_dataset(image_dir=train_image_dir, csv_path=train_csv_path, save_dir='examples/global-wheat-detection/train')
-    visualize_dataset(image_dir=train_image_dir, csv_path=test_csv_path, save_dir='examples/global-wheat-detection/test')
+    visualize_dataset(train_image_dir, train_csv_path, save_dir='examples/global-wheat-detection/train')
+    visualize_dataset(train_image_dir, test_csv_path, save_dir='examples/global-wheat-detection/test')
 
-    trainset = WheatDataset(
+    training_data = WheatDataset(
         image_dir=train_image_dir,
         csv_path=train_csv_path,
         transform=transforms.ToTensor()
     )
-    testset = WheatDataset(
+    test_data = WheatDataset(
         image_dir=train_image_dir,
         csv_path=test_csv_path,
         transform=transforms.ToTensor(),
     )
 
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=16, collate_fn=collate_fn)
-    testloader = DataLoader(testset, batch_size=batch_size, num_workers=16, collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16, collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8, collate_fn=collate_fn)
 
     model = WheatDetectionModule(csv_path=test_csv_path, lr=lr)
     wandb_logger = WandbLogger()
-    trainer = Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
-    trainer.fit(model, train_dataloaders=trainloader, val_dataloaders=testloader)
+    trainer = pl.Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
+    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
     trainer.save_checkpoint('wheat-faster-rcnn.ckpt')
     print('Saved PyTorch Lightning Model State to wheat-faster-rcnn.ckpt')
 
-    model = WheatDetectionModule.load_from_checkpoint(checkpoint_path='wheat-faster-rcnn.ckpt')
+    model = WheatDetectionModule.load_from_checkpoint(checkpoint_path='wheat-faster-rcnn.ckpt', csv_path=test_csv_path)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model.to(device)
     
-    visualize_predictions(testset, model)
+    visualize_predictions(test_data, device, model, 'examples/global-wheat-detection/faster-rcnn-lightning')

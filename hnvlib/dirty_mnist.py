@@ -5,7 +5,7 @@
 import os
 import csv
 import random
-from typing import Dict, Sequence, Callable, Tuple, List
+from typing import Dict, Sequence, Callable, Tuple, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -14,11 +14,11 @@ from PIL import Image
 import torch
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset, DataLoader
-from torchvision.models.resnet import resnet50
+from torchvision.models.resnet import resnet50, ResNet50_Weights
 from torchvision import transforms
 import pytorch_lightning as pl
-from pytorch_lightning import Trainer
-from torchmetrics import Accuracy
+from pytorch_lightning.loggers import WandbLogger
+from torchmetrics.classification import MultilabelF1Score
 
 
 NUM_CLASSES = 26
@@ -138,7 +138,7 @@ class MultiLabelResNet(nn.Module):
     """
     def __init__(self, num_classes: int) -> None:
         super().__init__()
-        self.resnet = resnet50()
+        self.resnet = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
         self.classifier = nn.Linear(1000, num_classes)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -189,7 +189,7 @@ def train(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Mod
             print(f'loss: {loss:>7f}  [{current:>5d}/{size:>5d}]')
 
 
-def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Module) -> None:
+def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Module, metric) -> None:
     """Dirty-MNIST 데이터셋으로 뉴럴 네트워크의 성능을 테스트합니다.
 
     :param dataloader: 파이토치 데이터로더
@@ -201,11 +201,9 @@ def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Modu
     :param loss_fn: 훈련에 사용되는 오차 함수
     :type loss_fn: nn.Module
     """
-    size = len(dataloader.dataset)
     num_batches = len(dataloader)
     model.eval()
     test_loss = 0
-    correct = 0
     with torch.no_grad():
         for images, targets in dataloader:
             images = images.to(device)
@@ -215,10 +213,12 @@ def test(dataloader: DataLoader, device: str, model: nn.Module, loss_fn: nn.Modu
             # print(targets, preds)
 
             test_loss += loss_fn(preds, targets.float()).item()
-            correct += ((torch.sigmoid(preds) >= 0.5) == targets).float().mean(axis=1).sum().item()
+            # print(torch.sigmoid(preds) >= 0.5)
+            # print(targets)
+            metric.update(torch.sigmoid(preds), targets)
     test_loss /= num_batches
-    correct /= size
-    print(f'Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n')
+    f1_score = metric.compute()
+    print(f'Test Error: \n F1 Score: {(100*f1_score):>0.1f}%, Avg loss: {test_loss:>8f} \n')
 
 
 def predict(test_data: Dataset, model: nn.Module) -> None:
@@ -236,9 +236,10 @@ def predict(test_data: Dataset, model: nn.Module) -> None:
     image = test_data[1][0].unsqueeze(0)
     target = test_data[1][1]
     with torch.no_grad():
-        pred = model(image) > 0.5
+        pred = torch.sigmoid(model(image)) >= 0.5
+        pred = pred.squeeze(0).nonzero()
         print(pred)
-        pred = pred.squeeze().nonzero()
+        print(target.nonzero()[0])
         predicted = [classes[p] for p in pred]
         actual = [classes[a] for a in target.nonzero()[0]]
         print(f'Predicted: "{predicted}", Actual: "{actual}"')
@@ -281,12 +282,13 @@ def run_pytorch(
     model = MultiLabelResNet(num_classes=NUM_CLASSES).to(device)
 
     loss_fn = nn.BCEWithLogitsLoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    metric = MultilabelF1Score(num_labels=NUM_CLASSES).to(device)
 
     for t in range(epochs):
         print(f'Epoch {t+1}\n-------------------------------')
         train(train_dataloader, device, model, loss_fn, optimizer)
-        test(test_dataloader, device, model, loss_fn)
+        test(test_dataloader, device, model, loss_fn, metric)
     print('Done!')
 
     torch.save(model.state_dict(), 'dirty-mnist-resnet.pth')
@@ -301,11 +303,13 @@ def run_pytorch(
 class DirtyMnistModule(pl.LightningModule):
     """모델과 학습/추론 코드가 포함된 파이토치 라이트닝 모듈입니다.
     """
-    def __init__(self) -> None:
-        super(DirtyMnistModule, self).__init__()
+    def __init__(self, lr: Optional[float] = None) -> None:
+        super().__init__()
         self.model = MultiLabelResNet(num_classes=NUM_CLASSES)
         self.loss_fn = nn.MultiLabelSoftMarginLoss()
-        self.metric = Accuracy(num_classes=NUM_CLASSES)
+        self.metric = MultilabelF1Score(num_labels=NUM_CLASSES)
+
+        self.lr = lr if lr is not None else 0.01
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         """옵티마이저를 정의합니다.
@@ -314,7 +318,7 @@ class DirtyMnistModule(pl.LightningModule):
         :return: 파이토치 옵티마이저
         :rtype: torch.optim.Optimizer
         """
-        return optim.Adam(self.parameters(), lr=1e-3)
+        return optim.Adam(self.parameters(), lr=self.lr)
 
     def forward(self, x: Tensor) -> Tensor:
         """피드 포워딩
@@ -336,10 +340,10 @@ class DirtyMnistModule(pl.LightningModule):
         :return: 훈련 오차 데이터
         :rtype: Dict[str, float]
         """
-        X, y = batch
+        images, targets = batch
 
-        pred = self(X)
-        loss = self.loss_fn(pred, y)
+        preds = self(images)
+        loss = self.loss_fn(preds, targets)
 
         self.log('train_loss', loss, prog_bar=True)
 
@@ -355,11 +359,11 @@ class DirtyMnistModule(pl.LightningModule):
         :return: 검증 오차 데이터
         :rtype: Dict[str, float]
         """
-        X, y = batch
+        images, targets = batch
 
-        pred = self(X)
-        loss = self.loss_fn(pred, y)
-        self.metric.update(pred, y)
+        preds = self(images)
+        loss = self.loss_fn(preds, targets)
+        self.metric.update(preds, targets)
 
         self.log('val_loss', loss, prog_bar=True)
 
@@ -375,7 +379,7 @@ class DirtyMnistModule(pl.LightningModule):
         self.metric.reset()
 
 
-def run_pytorch_lightning(batch_size: int, epochs: int) -> None:
+def run_pytorch_lightning(csv_path, image_dir, train_csv_path, test_csv_path, batch_size: int, epochs: int, lr) -> None:
     """학습/추론 파이토치 라이트닝 파이프라인입니다.
 
     :param batch_size: 학습 및 추론 데이터셋의 배치 크기
@@ -383,44 +387,30 @@ def run_pytorch_lightning(batch_size: int, epochs: int) -> None:
     :param epochs: 전체 학습 데이터셋을 훈련하는 횟수
     :type epochs: int
     """
-    transforms_train = transforms.Compose([
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            [0.485, 0.456, 0.406],
-            [0.229, 0.224, 0.225]
-        )
-    ])
+    split_dataset(csv_path)
 
-    transforms_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(
-            [0.485, 0.456, 0.406],
-            [0.229, 0.224, 0.225]
-        )
-    ])
-
-    trainset = DirtyMnistDataset(
-        'data/dirty-mnist/train',
-        'data/dirty-mnist/train_answer.csv',
-        transforms_train
+    training_data = DirtyMnistDataset(
+        image_dir=image_dir,
+        csv_path=train_csv_path,
+        transform=get_train_transform()
     )
-    testset = DirtyMnistDataset(
-        'data/dirty-mnist/train',
-        'data/dirty-mnist/test_answer.csv',
-        transforms_test
+    test_data = DirtyMnistDataset(
+        image_dir=image_dir,
+        csv_path=test_csv_path,
+        transform=get_test_transform()
     )
 
-    train_dataloader = DataLoader(trainset, batch_size=batch_size, num_workers=8)
-    test_dataloader = DataLoader(testset, batch_size=batch_size, num_workers=4)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=8)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=4)
 
-    model = DirtyMnistModule()
-    trainer = Trainer(max_epochs=epochs, gpus=1)
+    model = DirtyMnistModule(lr=lr)
+    wandb_logger = WandbLogger()
+    trainer = pl.Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
     trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
-    trainer.save_checkpoint('dirty-mnist.ckpt')
-    print('Saved PyTorch Lightning Model State to dirty-mnist.ckpt')
+    trainer.save_checkpoint('dirty-mnist-resnet.ckpt')
+    print('Saved PyTorch Lightning Model State to dirty-mnist-resnet.ckpt')
 
-    model = DirtyMnistModule.load_from_checkpoint(checkpoint_path='dirty-mnist.ckpt')
-    predict(testset, model)
+    model = DirtyMnistModule.load_from_checkpoint(checkpoint_path='dirty-mnist-resnet.ckpt')
+
+    predict(test_data, model)

@@ -18,7 +18,7 @@ from torch import nn, Tensor, optim
 from torch.utils.data import Dataset, DataLoader
 from torchvision.models.detection import keypointrcnn_resnet50_fpn
 from torchvision.utils import draw_keypoints
-from pytorch_lightning import LightningModule, Trainer
+import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
@@ -449,8 +449,8 @@ def run_pytorch(
     visualize_predictions(test_data, device, model, 'examples/dacon-keypoint/keypoint-rcnn')
 
 
-class DaconKeypointModule(LightningModule):
-    def __init__(self, image_dir, test_csv_path, lr):
+class DaconKeypointModule(pl.LightningModule):
+    def __init__(self, image_dir, test_csv_path, lr: Optional[float] = None):
         """_summary_
 
         Args:
@@ -458,10 +458,23 @@ class DaconKeypointModule(LightningModule):
             lr (_type_): _description_
         """
         super().__init__()
-
-        self.lr = lr
         self.model = keypointrcnn_resnet50_fpn(num_classes=NUM_CLASSES+1, num_keypoints=24)
         self.metric = ObjectKeypointSimilarity(image_dir, test_csv_path)
+        
+        self.lr = lr if lr is not None else 1e-2
+
+    def configure_optimizers(self):
+        """_summary_
+
+        Returns:
+            _type_: _description_
+        """
+        return torch.optim.SGD(
+            self.model.parameters(),
+            lr=self.lr,
+            momentum=0.9,
+            weight_decay=0.005,
+        )
         
     def forward(self, x):
         """_summary_
@@ -530,19 +543,6 @@ class DaconKeypointModule(LightningModule):
         self.metric.compute()
         self.metric.reset()
     
-    def configure_optimizers(self):
-        """_summary_
-
-        Returns:
-            _type_: _description_
-        """
-        return torch.optim.SGD(
-            self.model.parameters(),
-            lr=self.lr,
-            momentum=0.9,
-            weight_decay=0.005,
-        )
-    
 
 def run_pytorch_lightning(
     csv_path: os.PathLike,
@@ -564,35 +564,35 @@ def run_pytorch_lightning(
         epochs (int): _description_
         lr (float): _description_
     """
-    split_dataset(csv_path=csv_path)
+    split_dataset(csv_path)
     
-    visualize_dataset(image_dir=image_dir, csv_path=train_csv_path, save_dir='examples/dacon-keypoint/train')
-    visualize_dataset(image_dir=image_dir, csv_path=test_csv_path, save_dir='examples/dacon-keypoint/test')
+    visualize_dataset(image_dir, train_csv_path, save_dir='examples/dacon-keypoint/train')
+    visualize_dataset(image_dir, test_csv_path, save_dir='examples/dacon-keypoint/test')
 
-    trainset = DaconKeypointDataset(
+    training_data = DaconKeypointDataset(
         image_dir=image_dir,
         csv_path=train_csv_path,
         transform=get_transform()
     )
-    testset = DaconKeypointDataset(
+    test_data = DaconKeypointDataset(
         image_dir=image_dir,
         csv_path=test_csv_path,
         transform=get_transform(),
     )
 
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=1, collate_fn=collate_fn)
-    testloader = DataLoader(testset, batch_size=batch_size, num_workers=1, collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=1, collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=1, collate_fn=collate_fn)
 
     model = DaconKeypointModule(image_dir=image_dir, test_csv_path=test_csv_path, lr=lr)
     wandb_logger = WandbLogger()
-    trainer = Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
-    trainer.fit(model, train_dataloaders=trainloader, val_dataloaders=testloader)
+    trainer = pl.Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
+    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
     trainer.save_checkpoint('dacon-keypoint-rcnn.ckpt')
     print('Saved PyTorch Lightning Model State to dacon-keypoint-rcnn.ckpt')
 
-    model = DaconKeypointModule.load_from_checkpoint(checkpoint_path='dacon-keypoint-rcnn.ckpt', image_dir=image_dir, csv_path=test_csv_path, lr=lr)
+    model = DaconKeypointModule.load_from_checkpoint(checkpoint_path='dacon-keypoint-rcnn.ckpt', image_dir=image_dir, csv_path=test_csv_path)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
     
-    visualize_predictions(testset, device, model, 'examples/dacon-keypoint/keypoint-rcnn-lightning')
+    visualize_predictions(test_data, device, model, 'examples/dacon-keypoint/keypoint-rcnn-lightning')

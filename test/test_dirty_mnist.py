@@ -15,7 +15,7 @@ def main():
         test_csv_path=VAL_CSV_PATH,
         batch_size=32,
         epochs=20,
-        lr=1e-4
+        lr=1e-2
     )
 
 

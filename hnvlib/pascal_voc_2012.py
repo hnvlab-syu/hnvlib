@@ -18,7 +18,6 @@ from torchvision.transforms import Compose, ToTensor, Resize, InterpolationMode
 from torchvision.utils import draw_segmentation_masks
 from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet50_Weights
 import pytorch_lightning as pl
-from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from torchmetrics.classification import MulticlassJaccardIndex
 
@@ -329,11 +328,13 @@ def run_pytorch(
 class PascalVOC2012Module(pl.LightningModule):
     """모델과 학습/추론 코드가 포함된 파이토치 라이트닝 모듈입니다.
     """
-    def __init__(self) -> None:
-        super(PascalVOC2012Module, self).__init__()
+    def __init__(self, lr: Optional[float] = None) -> None:
+        super().__init__()
         self.model = deeplabv3_resnet50(num_classes=NUM_CLASSES+1)
         self.loss_fn = nn.CrossEntropyLoss()
         self.metric = MulticlassJaccardIndex(num_classes=NUM_CLASSES+1, ignore_index=0)
+
+        self.lr = lr if self.lr is not None else 1e-2
 
     def configure_optimizers(self):
         """옵티마이저를 정의합니다.
@@ -341,7 +342,7 @@ class PascalVOC2012Module(pl.LightningModule):
         :return: 파이토치 옵티마이저
         :rtype: torch.optim.Optimizer
         """
-        return optim.SGD(self.parameters(), lr=0.01, momentum=0.9)
+        return optim.SGD(self.parameters(), lr=self.lr, momentum=0.9)
 
     def forward(self, x: Tensor) -> Tensor:
         """피드 포워딩 함수
@@ -365,9 +366,9 @@ class PascalVOC2012Module(pl.LightningModule):
         """
         images, targets, _ = batch
 
-        pred = self.model(images)['out']
-        pred = torch.softmax(pred, dim=1)
-        loss = self.loss_fn(pred, targets)
+        preds = self.model(images)['out']
+        preds = torch.softmax(preds, dim=1)
+        loss = self.loss_fn(preds, targets)
 
         self.log('train_loss', loss, prog_bar=True)
 
@@ -385,10 +386,10 @@ class PascalVOC2012Module(pl.LightningModule):
         """
         images, targets, _ = batch
 
-        pred = self.model(images)['out']
-        pred = torch.softmax(pred, dim=1)
-        loss = self.loss_fn(pred, targets)
-        self.metric.update(pred, targets.argmax(dim=1))
+        preds = self.model(images)['out']
+        preds = torch.softmax(preds, dim=1)
+        loss = self.loss_fn(preds, targets)
+        self.metric.update(preds, targets.argmax(dim=1))
 
         self.log('val_loss', loss, prog_bar=True)
 
@@ -412,7 +413,8 @@ def run_pytorch_lightning(
     test_csv_path: os.PathLike,
     batch_size: int,
     epochs: int,
-    size: Sequence[int]
+    lr: float,
+    size: Sequence[int],
 ) -> None:
     split_dataset(label_dir, root_dir)
 
@@ -438,15 +440,15 @@ def run_pytorch_lightning(
     train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
-    model = PascalVOC2012Module()
+    model = PascalVOC2012Module(lr=lr)
     wandb_logger = WandbLogger()
-    trainer = Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
+    trainer = pl.Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
     trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
-    trainer.save_checkpoint('pascal_voc_2012_deeplabv3.ckpt')
-    print('Saved PyTorch Lightning Model State to pascal_voc_2012_deeplabv3.ckpt')
+    trainer.save_checkpoint('pascal-voc-2012-deeplabv3.ckpt')
+    print('Saved PyTorch Lightning Model State to pascal-voc-2012-deeplabv3.ckpt')
 
-    model = PascalVOC2012Module.load_from_checkpoint(checkpoint_path='pascal_voc_2012_deeplabv3.ckpt')
+    model = PascalVOC2012Module.load_from_checkpoint(checkpoint_path='pascal-voc-2012-deeplabv3.ckpt')
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
     

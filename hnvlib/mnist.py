@@ -2,7 +2,7 @@
 MNIST Dataset Link : https://www.kaggle.com/c/digit-recognizer
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 import torch
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset, DataLoader
@@ -10,6 +10,7 @@ from torchvision import datasets
 from torchvision.transforms import ToTensor
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
+from pytorch_lightning.loggers import WandbLogger
 from torchmetrics import Accuracy
 
 
@@ -178,11 +179,13 @@ def run_pytorch(batch_size: int, epochs: int, lr: float) -> None:
 class MNISTNetworkModule(pl.LightningModule):
     """모델과 학습/추론 코드가 포함된 파이토치 라이트닝 모듈입니다.
     """
-    def __init__(self) -> None:
-        super(MNISTNetworkModule, self).__init__()
+    def __init__(self, lr: Optional[float] = None) -> None:
+        super().__init__()
         self.model = NeuralNetwork(num_classes=NUM_CLASSES)
         self.loss_fn = nn.CrossEntropyLoss()
         self.metric = Accuracy(num_classes=NUM_CLASSES)
+        
+        self.lr = lr if lr is not None else 0.01
 
     def configure_optimizers(self) -> _Optimizer:
         """옵티마이저를 정의합니다.
@@ -190,7 +193,7 @@ class MNISTNetworkModule(pl.LightningModule):
         :return: 파이토치 옵티마이저
         :rtype: torch.optim.Optimizer
         """
-        return optim.SGD(self.parameters(), lr=0.01, momentum=0.9)
+        return optim.SGD(self.parameters(), lr=self.lr, momentum=0.9)
 
     def forward(self, x: Tensor) -> Tensor:
         """피드 포워딩
@@ -212,10 +215,10 @@ class MNISTNetworkModule(pl.LightningModule):
         :return: 훈련 오차 데이터
         :rtype: Dict[str, float]
         """
-        X, y = batch
+        images, targets = batch
 
-        pred = self(X)
-        loss = self.loss_fn(pred, y)
+        preds = self(images)
+        loss = self.loss_fn(preds, targets)
 
         self.log('train_loss', loss, prog_bar=True)
 
@@ -231,11 +234,11 @@ class MNISTNetworkModule(pl.LightningModule):
         :return: 검증 오차 데이터
         :rtype: Dict[str, float]
         """
-        X, y = batch
+        images, targets = batch
 
-        pred = self(X)
-        loss = self.loss_fn(pred, y)
-        self.metric.update(pred, y)
+        preds = self(images)
+        loss = self.loss_fn(preds, targets)
+        self.metric.update(preds, targets)
 
         self.log('val_loss', loss, prog_bar=True)
 
@@ -251,7 +254,7 @@ class MNISTNetworkModule(pl.LightningModule):
         self.metric.reset()
 
 
-def run_pytorch_lightning(batch_size: int, epochs: int) -> None:
+def run_pytorch_lightning(batch_size: int, epochs: int, lr: float) -> None:
     """학습/추론 파이토치 라이트닝 파이프라인입니다.
 
     :param batch_size: 학습 및 추론 데이터셋의 배치 크기
@@ -273,15 +276,17 @@ def run_pytorch_lightning(batch_size: int, epochs: int) -> None:
         transform=ToTensor(),
     )
 
-    train_dataloader = DataLoader(training_data, batch_size=batch_size, num_workers=16)
+    train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, num_workers=16)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
-    model = MNISTNetworkModule()
-    trainer = Trainer(max_epochs=epochs, gpus=1)
+    model = MNISTNetworkModule(lr=lr)
+    wandb_logger = WandbLogger()
+    trainer = Trainer(max_epochs=epochs, accelerator='gpu', devices=1, logger=wandb_logger)
     trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=test_dataloader)
 
-    trainer.save_checkpoint('model.ckpt')
-    print('Saved PyTorch Lightning Model State to model.ckpt')
+    trainer.save_checkpoint('mnist-net.ckpt')
+    print('Saved PyTorch Lightning Model State to mnist-net.ckpt')
 
-    model = MNISTNetworkModule.load_from_checkpoint(checkpoint_path='model.ckpt')
+    model = MNISTNetworkModule.load_from_checkpoint(checkpoint_path='mnist-net.ckpt')
+
     predict(test_data, model)
