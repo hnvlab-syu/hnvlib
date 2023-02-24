@@ -2,7 +2,7 @@ import os
 import shutil
 import random
 from glob import glob
-from typing import Tuple, Optional, Sequence, Callable
+from typing import Optional, Sequence, Callable
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,7 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as F
 from torchvision.transforms import Compose, ToTensor, Resize, InterpolationMode
 from torchvision.utils import draw_segmentation_masks
-from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet50_Weights
+from torchvision.models.segmentation import deeplabv3_resnet50
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from torchmetrics.classification import MulticlassJaccardIndex

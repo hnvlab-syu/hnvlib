@@ -3,7 +3,7 @@ import json
 import random
 import shutil
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -18,7 +18,7 @@ from pycocotools.cocoeval import COCOeval
 import pycocotools.mask as coco_mask
 
 import torch
-from torch import nn, Tensor, optim
+from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.models.detection.mask_rcnn import maskrcnn_resnet50_fpn
