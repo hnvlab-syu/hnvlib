@@ -279,7 +279,6 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
 
 
 def run_pytorch(
-    root_dir: os.PathLike,
     lr_dir: os.PathLike,
     hr_dir: os.PathLike,
     train_csv_path: os.PathLike,

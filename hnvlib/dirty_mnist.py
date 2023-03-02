@@ -14,7 +14,7 @@ from PIL import Image
 import torch
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset, DataLoader
-from torchvision.models.resnet import resnet50, ResNet50_Weights
+from torchvision.models.resnet import resnet50
 from torchvision import transforms
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
@@ -138,7 +138,7 @@ class MultiLabelResNet(nn.Module):
     """
     def __init__(self, num_classes: int) -> None:
         super().__init__()
-        self.resnet = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+        self.resnet = resnet50()
         self.classifier = nn.Linear(1000, num_classes)
 
     def forward(self, x: Tensor) -> Tensor:

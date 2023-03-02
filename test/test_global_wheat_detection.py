@@ -135,16 +135,7 @@ def main():
     # json_path = to_coco(VAL_CSV_PATH)
     # visualize_coco(json_path, TRAIN_IMAGE_DIR, 'examples/global-wheat-detection/coco')
     
-    # run_pytorch(
-    #     csv_path=CSV_PATH,
-    #     train_image_dir=TRAIN_IMAGE_DIR,
-    #     train_csv_path=TRAIN_CSV_PATH,
-    #     test_csv_path=VAL_CSV_PATH,
-    #     batch_size=16,
-    #     epochs=2,
-    #     lr=1e-3
-    # )
-    run_pytorch_lightning(
+    run_pytorch(
         csv_path=CSV_PATH,
         train_image_dir=TRAIN_IMAGE_DIR,
         train_csv_path=TRAIN_CSV_PATH,
@@ -153,6 +144,15 @@ def main():
         epochs=2,
         lr=1e-3
     )
+    # run_pytorch_lightning(
+    #     csv_path=CSV_PATH,
+    #     train_image_dir=TRAIN_IMAGE_DIR,
+    #     train_csv_path=TRAIN_CSV_PATH,
+    #     test_csv_path=VAL_CSV_PATH,
+    #     batch_size=16,
+    #     epochs=2,
+    #     lr=1e-3
+    # )
 
 
 if __name__ == '__main__':

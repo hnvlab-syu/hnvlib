@@ -11,6 +11,7 @@ from collections import defaultdict
 from typing import Callable, Optional, Sequence, Tuple, TypeVar
 
 import pandas as pd
+import numpy as np
 from PIL import Image
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -118,7 +119,9 @@ class WheatDataset(Dataset):
 
         image = Image.open(os.path.join(self.image_dir, f'{image_id}.jpg')).convert('RGB')
 
-        boxes = [literal_eval(box) for box in self.grouped_dict[image_id]['bbox']]
+        boxes = np.array([literal_eval(box) for box in self.grouped_dict[image_id]['bbox']])
+        boxes[:, 2] = boxes[:, 0] + boxes[:, 2]
+        boxes[:, 3] = boxes[:, 1] + boxes[:, 3]
         labels = [1] * len(boxes)
 
         if self.transform is not None:

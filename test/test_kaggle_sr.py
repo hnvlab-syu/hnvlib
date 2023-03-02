@@ -24,7 +24,16 @@ def main():
     #     csv_path=VAL_CSV_PATH,
     #     save_dir='examples/kaggle-sr/test',
     # )
-    # run_pytorch(
+    run_pytorch(
+        lr_dir=LR_DIR,
+        hr_dir=HR_DIR,
+        train_csv_path=TRAIN_CSV_PATH,
+        test_csv_path=VAL_CSV_PATH,
+        batch_size=8,
+        epochs=25,
+        lr=1e-2
+    )
+    # run_pytorch_lightning(
     #     root_dir=ROOT_DIR,
     #     lr_dir=LR_DIR,
     #     hr_dir=HR_DIR,
@@ -33,15 +42,6 @@ def main():
     #     batch_size=8,
     #     epochs=15,
     # )
-    run_pytorch_lightning(
-        root_dir=ROOT_DIR,
-        lr_dir=LR_DIR,
-        hr_dir=HR_DIR,
-        train_csv_path=TRAIN_CSV_PATH,
-        test_csv_path=VAL_CSV_PATH,
-        batch_size=8,
-        epochs=15,
-    )
 
 
 if __name__ == '__main__':

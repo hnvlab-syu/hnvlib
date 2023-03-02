@@ -261,13 +261,13 @@ def visualize_predictions(testset: Dataset, device: str, model: nn.Module, save_
 
 
 def run_pytorch(
-    root_dir: os.PathLike,
     image_dir: os.PathLike,
     label_dir: os.PathLike,
     train_csv_path: os.PathLike,
     test_csv_path: os.PathLike,
     batch_size: int,
     epochs: int,
+    lr: float,
     size: Sequence[int]
 ) -> None:
     """학습/추론 파이토치 파이프라인입니다.
@@ -306,7 +306,7 @@ def run_pytorch(
     model = deeplabv3_resnet50(num_classes=NUM_CLASSES+1).to(device)
 
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
     metric = MulticlassJaccardIndex(num_classes=NUM_CLASSES+1, ignore_index=0).to(device)
 
     for t in range(epochs):

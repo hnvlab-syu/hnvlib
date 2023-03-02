@@ -147,16 +147,7 @@ def main():
     # json_path = to_coco(VAL_CSV_PATH)
     # visualize_coco(json_path, IMAGE_DIR, 'examples/dacon-keypoint/coco')
 
-    # run_pytorch(
-    #     csv_path=CSV_PATH,
-    #     image_dir=IMAGE_DIR,
-    #     train_csv_path=TRAIN_CSV_PATH,
-    #     test_csv_path=VAL_CSV_PATH,
-    #     batch_size=8,
-    #     epochs=3,
-    #     lr=1e-2
-    # )
-    run_pytorch_lightning(
+    run_pytorch(
         csv_path=CSV_PATH,
         image_dir=IMAGE_DIR,
         train_csv_path=TRAIN_CSV_PATH,
@@ -165,6 +156,15 @@ def main():
         epochs=3,
         lr=1e-2
     )
+    # run_pytorch_lightning(
+    #     csv_path=CSV_PATH,
+    #     image_dir=IMAGE_DIR,
+    #     train_csv_path=TRAIN_CSV_PATH,
+    #     test_csv_path=VAL_CSV_PATH,
+    #     batch_size=8,
+    #     epochs=3,
+    #     lr=1e-2
+    # )
 
 
 if __name__ == '__main__':

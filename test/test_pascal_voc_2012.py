@@ -40,7 +40,17 @@ def main():
     #     save_dir='examples/pascal-voc-2012/val',
     #     alpha=0.8
     # )
-    # run_pytorch(
+    run_pytorch(
+        image_dir=IMAGE_DIR,
+        label_dir=LABEL_DIR,
+        train_csv_path=TRAIN_CSV_PATH,
+        test_csv_path=VAL_CSV_PATH,
+        batch_size=8,
+        epochs=30,
+        lr=1e-2,
+        size=(500, 500)
+    )
+    # run_pytorch_lightning(
     #     root_dir=ROOT_DIR,
     #     image_dir=IMAGE_DIR,
     #     label_dir=LABEL_DIR,
@@ -50,16 +60,6 @@ def main():
     #     epochs=30,
     #     size=(500, 500)
     # )
-    run_pytorch_lightning(
-        root_dir=ROOT_DIR,
-        image_dir=IMAGE_DIR,
-        label_dir=LABEL_DIR,
-        train_csv_path=TRAIN_CSV_PATH,
-        test_csv_path=VAL_CSV_PATH,
-        batch_size=8,
-        epochs=30,
-        size=(500, 500)
-    )
 
 
 if __name__ == '__main__':
