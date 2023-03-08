@@ -1,6 +1,8 @@
 """MNIST 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
 MNIST Dataset Link : https://www.kaggle.com/c/digit-recognizer
 """
+# implemented and written by Yeoreum Lee, Wangtaek Oh in AI HnV Lab @ Sahmyook University in 2023
+__author__ = 'leeyeoreum02, ohkingtaek'
 
 from typing import Dict, List, Optional
 

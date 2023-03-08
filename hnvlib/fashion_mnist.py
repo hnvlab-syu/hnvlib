@@ -1,6 +1,8 @@
 """FashionMNIST 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
 FashionMNIST Dataset Link : https://www.kaggle.com/datasets/zalando-research/fashionmnist
 """
+# implemented and written by Yeoreum Lee, Wangtaek Oh in AI HnV Lab @ Sahmyook University in 2023
+__author__ = 'leeyeoreum02, ohkingtaek'
 
 from typing import Dict, List, Optional
 
@@ -184,6 +186,9 @@ def run_pytorch(batch_size: int, epochs: int, lr: float) -> None:
     model.load_state_dict(torch.load('fashion-mnist-net.pth'))
 
     predict(test_data, model)
+
+
+# ====================== PyTorch Lightning ======================
 
 
 class FashionMNISTNetworkModule(pl.LightningModule):

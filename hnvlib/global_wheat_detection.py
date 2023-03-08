@@ -1,6 +1,8 @@
 """Wheat 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
 Wheat Dataset Link : https://www.kaggle.com/c/global-wheat-detection
 """
+# implemented and written by Yeoreum Lee, Wangtaek Oh in AI HnV Lab @ Sahmyook University in 2023
+__author__ = 'leeyeoreum02, ohkingtaek'
 
 import os
 import shutil
@@ -494,6 +496,9 @@ def run_pytorch(
     model.to(device)
 
     visualize_predictions(test_data, device, model, 'examples/global-wheat-detection/faster-rcnn')
+
+
+# ====================== PyTorch Lightning ======================
     
     
 class WheatDetectionModule(pl.LightningModule):

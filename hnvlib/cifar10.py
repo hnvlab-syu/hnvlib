@@ -1,6 +1,8 @@
 """CIFAR-10 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
 CIFAR-10 Dataset Link : https://www.cs.toronto.edu/~kriz/cifar.html
 """
+# implemented and written by Yeoreum Lee, Wangtaek Oh in AI HnV Lab @ Sahmyook University in 2023
+__author__ = 'leeyeoreum02, ohkingtaek'
 
 from typing import Dict, List, TypeVar, Optional
 
@@ -195,6 +197,9 @@ def run_pytorch(batch_size: int, epochs: int, lr: float) -> None:
     model.load_state_dict(torch.load('cifar-net-lenet.pth'))
 
     predict(test_data, model)
+
+
+# ====================== PyTorch Lightning ======================
 
 
 class CIFARNetworkModule(pl.LightningModule):

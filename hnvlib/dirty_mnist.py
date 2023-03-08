@@ -1,6 +1,8 @@
 """월간 데이콘 제 2회 컴퓨터 비전 학습 경진대회 데이터셋으로 간단한 뉴럴 네트워크를 훈련하고 추론하는 코드입니다.
 월간 데이콘 제 2회 컴퓨터 비전 학습 경진대회 Dataset Link : https://dacon.io/competitions/official/235697/overview/description
 """
+# implemented and written by Yeoreum Lee, Wangtaek Oh in AI HnV Lab @ Sahmyook University in 2023
+__author__ = 'leeyeoreum02, ohkingtaek'
 
 import os
 import csv
@@ -298,6 +300,9 @@ def run_pytorch(
     model.load_state_dict(torch.load('dirty-mnist-resnet.pth'))
 
     predict(test_data, model)
+
+
+# ====================== PyTorch Lightning ======================
 
 
 class DirtyMnistModule(pl.LightningModule):

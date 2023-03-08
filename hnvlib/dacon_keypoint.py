@@ -1,3 +1,6 @@
+# implemented and written by Yeoreum Lee, Wangtaek Oh in AI HnV Lab @ Sahmyook University in 2023
+__author__ = 'leeyeoreum02, ohkingtaek'
+
 import os
 import json
 import shutil
@@ -447,6 +450,9 @@ def run_pytorch(
     model.to(device)
 
     visualize_predictions(test_data, device, model, 'examples/dacon-keypoint/keypoint-rcnn')
+
+
+# ====================== PyTorch Lightning ======================
 
 
 class DaconKeypointModule(pl.LightningModule):
