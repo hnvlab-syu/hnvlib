@@ -179,6 +179,9 @@ def run_pytorch(batch_size: int, epochs: int, lr: float) -> None:
     predict(test_data, model)
 
 
+# ====================== PyTorch Lightning ======================
+
+
 class MNISTNetworkModule(pl.LightningModule):
     """모델과 학습/추론 코드가 포함된 파이토치 라이트닝 모듈입니다.
     """
