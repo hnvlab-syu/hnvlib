@@ -1,4 +1,4 @@
-HnVLib - Hnv Lab code Library
+HnVLib - HnV Lab code Library
 =============================
 
 Install
